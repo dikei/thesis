@@ -64,3 +64,4 @@ project/boot/
 # Input output data
 data/
 out/
+spark-assembly-1.6.0-hadoop2.2.0.jar
