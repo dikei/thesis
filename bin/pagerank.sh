@@ -5,4 +5,5 @@ spark-submit --class pt.tecnico.spark.graph.PageRank \
     /home/dikei/Tools/tmp/spark-testing/data/web-Google.txt \
     /home/dikei/Tools/tmp/spark-testing/out/pagerank \
     10 \
+    4 \
     stats
