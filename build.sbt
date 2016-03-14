@@ -4,6 +4,9 @@ version := "1.0"
 
 scalaVersion := "2.10.6"
 
+javacOptions ++= Seq("-source", "1.7", "-target", "1.7")
+scalacOptions += "-target:jvm-1.7"
+
 libraryDependencies ++= Seq(
   "com.google.guava" % "guava" % "19.0",
   "org.apache.spark" % "spark-core_2.10" % "1.6.1" % "provided",
