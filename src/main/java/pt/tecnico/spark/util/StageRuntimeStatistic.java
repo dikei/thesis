@@ -3,7 +3,7 @@ package pt.tecnico.spark.util;
 /**
  * POJO to save task runtime
  */
-public class TaskRuntimeStatistic {
+public class StageRuntimeStatistic {
     private Integer stageId;
     private Long average;
     private Long fastest;
@@ -23,25 +23,25 @@ public class TaskRuntimeStatistic {
     private Long startTime;
     private Long completionTime;
 
-    public TaskRuntimeStatistic() {
+    public StageRuntimeStatistic() {
     }
 
-    public TaskRuntimeStatistic(Integer stageId,
-                                Long average,
-                                Long fastest,
-                                Long slowest,
-                                Long standardDeviation,
-                                String name,
-                                Integer taskCount,
-                                Long percent5,
-                                Long percent25,
-                                Long median,
-                                Long percent75,
-                                Long percent95,
-                                Long totalTaskRuntime,
-                                Long stageRuntime,
-                                Long fetchWaitTime,
-                                Long shuffleWriteTime) {
+    public StageRuntimeStatistic(Integer stageId,
+                                 Long average,
+                                 Long fastest,
+                                 Long slowest,
+                                 Long standardDeviation,
+                                 String name,
+                                 Integer taskCount,
+                                 Long percent5,
+                                 Long percent25,
+                                 Long median,
+                                 Long percent75,
+                                 Long percent95,
+                                 Long totalTaskRuntime,
+                                 Long stageRuntime,
+                                 Long fetchWaitTime,
+                                 Long shuffleWriteTime) {
         this.stageId = stageId;
         this.average = average;
         this.fastest = fastest;

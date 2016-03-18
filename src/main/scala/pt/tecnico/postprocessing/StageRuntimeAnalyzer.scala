@@ -1,12 +1,12 @@
 package pt.tecnico.postprocessing
 
-import java.io.{FileWriter, FileReader, File}
+import java.io.{File, FileReader, FileWriter}
 
 import org.supercsv.cellprocessor.constraint.NotNull
-import org.supercsv.cellprocessor.{ParseLong, ParseDate, ParseInt}
-import org.supercsv.io.{CsvBeanWriter, CsvBeanReader}
+import org.supercsv.cellprocessor.{ParseDate, ParseInt, ParseLong}
+import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
-import pt.tecnico.spark.util.TaskRuntimeStatistic
+import pt.tecnico.spark.util.StageRuntimeStatistic
 
 import scala.collection.mutable
 
@@ -45,12 +45,12 @@ object StageRuntimeAnalyzer {
     )
 
     var headers: Array[String] = null
-    val average : Array[TaskRuntimeStatistic] = files.flatMap { f =>
+    val average : Array[StageRuntimeStatistic] = files.flatMap { f =>
       val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
       try {
         headers = reader.getHeader(true)
-        Iterator.continually[TaskRuntimeStatistic](reader.read(classOf[TaskRuntimeStatistic], headers, processors:_*))
-          .takeWhile(_ != null).toArray[TaskRuntimeStatistic]
+        Iterator.continually[StageRuntimeStatistic](reader.read(classOf[StageRuntimeStatistic], headers, processors:_*))
+          .takeWhile(_ != null).toArray[StageRuntimeStatistic]
       } finally {
         reader.close()
       }
@@ -58,8 +58,8 @@ object StageRuntimeAnalyzer {
     .groupBy(_.getStageId)
     .map { case (stageId, stages) =>
       val count = stages.length
-      val total = stages.reduce[TaskRuntimeStatistic] { case (s1: TaskRuntimeStatistic, s2: TaskRuntimeStatistic) =>
-        new TaskRuntimeStatistic(
+      val total = stages.reduce[StageRuntimeStatistic] { case (s1: StageRuntimeStatistic, s2: StageRuntimeStatistic) =>
+        new StageRuntimeStatistic(
           stageId,
           s1.getAverage + s2.getAverage,
           s1.getFastest + s2.getFastest,
@@ -77,7 +77,7 @@ object StageRuntimeAnalyzer {
           s1.getFetchWaitTime + s2.getFetchWaitTime,
           s1.getShuffleWriteTime + s2.getShuffleWriteTime)
       }
-      new TaskRuntimeStatistic(
+      new StageRuntimeStatistic(
         stageId,
         total.getAverage / count,
         total.getFastest / count,

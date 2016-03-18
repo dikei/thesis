@@ -119,7 +119,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     log.info("75th percentile: {} ms", percent75)
     log.info("95th percentile: {} ms", percent95)
 
-    val taskRuntimeStats = new TaskRuntimeStatistic
+    val taskRuntimeStats = new StageRuntimeStatistic
     taskRuntimeStats.setStartTime(info.submissionTime.get)
     taskRuntimeStats.setCompletionTime(info.completionTime.get)
     taskRuntimeStats.setName(info.name)
