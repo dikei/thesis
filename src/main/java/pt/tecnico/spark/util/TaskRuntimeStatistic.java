@@ -20,6 +20,61 @@ public class TaskRuntimeStatistic {
     private Long stageRuntime;
     private Long fetchWaitTime;
     private Long shuffleWriteTime;
+    private Long startTime;
+    private Long completionTime;
+
+    public TaskRuntimeStatistic() {
+    }
+
+    public TaskRuntimeStatistic(Integer stageId,
+                                Long average,
+                                Long fastest,
+                                Long slowest,
+                                Long standardDeviation,
+                                String name,
+                                Integer taskCount,
+                                Long percent5,
+                                Long percent25,
+                                Long median,
+                                Long percent75,
+                                Long percent95,
+                                Long totalTaskRuntime,
+                                Long stageRuntime,
+                                Long fetchWaitTime,
+                                Long shuffleWriteTime) {
+        this.stageId = stageId;
+        this.average = average;
+        this.fastest = fastest;
+        this.slowest = slowest;
+        this.standardDeviation = standardDeviation;
+        this.name = name;
+        this.taskCount = taskCount;
+        this.percent5 = percent5;
+        this.percent25 = percent25;
+        this.median = median;
+        this.percent75 = percent75;
+        this.percent95 = percent95;
+        this.totalTaskRuntime = totalTaskRuntime;
+        this.stageRuntime = stageRuntime;
+        this.fetchWaitTime = fetchWaitTime;
+        this.shuffleWriteTime = shuffleWriteTime;
+    }
+
+    public Long getStartTime() {
+        return startTime;
+    }
+
+    public void setStartTime(Long startTime) {
+        this.startTime = startTime;
+    }
+
+    public Long getCompletionTime() {
+        return completionTime;
+    }
+
+    public void setCompletionTime(Long completionTime) {
+        this.completionTime = completionTime;
+    }
 
     public Long getFetchWaitTime() {
         return fetchWaitTime;
@@ -147,5 +202,27 @@ public class TaskRuntimeStatistic {
 
     public void setStandardDeviation(Long standardDeviation) {
         this.standardDeviation = standardDeviation;
+    }
+
+    @Override
+    public String toString() {
+        return "TaskRuntimeStatistic{" +
+                "stageId=" + stageId +
+                ", average=" + average +
+                ", fastest=" + fastest +
+                ", slowest=" + slowest +
+                ", standardDeviation=" + standardDeviation +
+                ", name='" + name + '\'' +
+                ", taskCount=" + taskCount +
+                ", percent5=" + percent5 +
+                ", percent25=" + percent25 +
+                ", median=" + median +
+                ", percent75=" + percent75 +
+                ", percent95=" + percent95 +
+                ", totalTaskRuntime=" + totalTaskRuntime +
+                ", stageRuntime=" + stageRuntime +
+                ", fetchWaitTime=" + fetchWaitTime +
+                ", shuffleWriteTime=" + shuffleWriteTime +
+                '}';
     }
 }

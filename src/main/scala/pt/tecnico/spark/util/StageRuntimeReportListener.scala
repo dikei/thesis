@@ -29,7 +29,8 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
   private val headers = Array (
     "StageId", "Name", "TaskCount", "TotalTaskRuntime", "StageRuntime", "FetchWaitTime", "ShuffleWriteTime",
     "Average", "Fastest", "Slowest", "StandardDeviation",
-    "Percent5", "Percent25", "Median", "Percent75", "Percent95"
+    "Percent5", "Percent25", "Median", "Percent75", "Percent95",
+    "StartTime", "CompletionTime"
   )
 
   private val csvWriter = new CsvBeanWriter(new FileWriter(new File(statisticDir, fileName)), CsvPreference.STANDARD_PREFERENCE)
@@ -103,6 +104,8 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     log.info("Stage completed: {}", info)
     log.info("Number of tasks: {}", info.numTasks)
     log.info("Stage runtime: {} ms", runtime)
+    log.info("Stage submission time: {}", info.submissionTime.get)
+    log.info("Stage completion time: {}", info.completionTime.get)
     log.info("Total task time: {} ms", totalDuration)
     log.info("Fetch wait time: {} ms", fetchWaitTime)
     log.info("Shuffle write time: {} ms", shuffleWriteTime)
@@ -117,6 +120,8 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     log.info("95th percentile: {} ms", percent95)
 
     val taskRuntimeStats = new TaskRuntimeStatistic
+    taskRuntimeStats.setStartTime(info.submissionTime.get)
+    taskRuntimeStats.setCompletionTime(info.completionTime.get)
     taskRuntimeStats.setName(info.name)
     taskRuntimeStats.setStageId(info.stageId)
     taskRuntimeStats.setTaskCount(info.numTasks)
