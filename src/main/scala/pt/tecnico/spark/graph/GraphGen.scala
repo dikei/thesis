@@ -12,19 +12,19 @@ object GraphGen {
 
     if (args.length < 2) {
       println("Usage: ")
-      println("spark-submit --class pt.tecnico.spark.graph.GraphGen [output] [#vertices] [#randomseed]")
+      println("spark-submit --class pt.tecnico.spark.graph.GraphGen [output] [#vertices] [#randomseed] [#partition]")
       System.exit(0)
     }
 
     val output = args(0)
     val noVertices = args(1).toInt
     val randomSeed = if (args.length > 2) args(2).toInt else 13290
-
+    val noPartition = if (args.length > 3) args(3).toInt else 0
     val conf = new SparkConf().setAppName("GraphGen")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     val sc = new SparkContext(conf)
 
-    val graph = GraphGenerators.logNormalGraph(sc, noVertices, seed = randomSeed)
+    val graph = GraphGenerators.logNormalGraph(sc, noVertices, seed = randomSeed, numEParts = noPartition)
 
     graph.edges.map { edge =>
       edge.srcId + " " + edge.dstId

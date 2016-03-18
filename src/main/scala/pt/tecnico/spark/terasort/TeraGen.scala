@@ -30,9 +30,9 @@ import org.apache.spark.{SparkConf, SparkContext}
 object TeraGen {
   def main(args: Array[String]) {
 
-    if (args.length < 2) {
+    if (args.length < 3) {
       println("Usage:")
-      println("spark-submit --class pt.tecnico.spark.terasort.TeraGen [jar] [output-size] [output-directory]")
+      println("spark-submit --class pt.tecnico.spark.terasort.TeraGen [jar] [output-size] [output-directory] [#partitions]")
       System.exit(0)
     }
 
@@ -46,7 +46,7 @@ object TeraGen {
       .setAppName(s"TeraGen ($size)")
     val sc = new SparkContext(conf)
 
-    val parts = sc.defaultParallelism
+    val parts = args(2).toInt
     val recordsPerPartition = outputSizeInBytes / 100 / parts.toLong
     val numRecords = recordsPerPartition * parts.toLong
 
