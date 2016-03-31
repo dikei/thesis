@@ -22,6 +22,10 @@ public class StageRuntimeStatistic {
     private Long shuffleWriteTime;
     private Long startTime;
     private Long completionTime;
+    private Double cpuUsage;
+    private Double systemLoad;
+    private Double upload;
+    private Double download;
 
     public StageRuntimeStatistic() {
     }
@@ -41,7 +45,11 @@ public class StageRuntimeStatistic {
                                  Long totalTaskRuntime,
                                  Long stageRuntime,
                                  Long fetchWaitTime,
-                                 Long shuffleWriteTime) {
+                                 Long shuffleWriteTime,
+                                 Double cpuUsage,
+                                 Double systemLoad,
+                                 Double upload,
+                                 Double download) {
         this.stageId = stageId;
         this.average = average;
         this.fastest = fastest;
@@ -58,6 +66,42 @@ public class StageRuntimeStatistic {
         this.stageRuntime = stageRuntime;
         this.fetchWaitTime = fetchWaitTime;
         this.shuffleWriteTime = shuffleWriteTime;
+        this.cpuUsage = cpuUsage;
+        this.systemLoad = systemLoad;
+        this.upload = upload;
+        this.download = download;
+    }
+
+    public Double getUpload() {
+        return upload;
+    }
+
+    public void setUpload(Double upload) {
+        this.upload = upload;
+    }
+
+    public Double getDownload() {
+        return download;
+    }
+
+    public void setDownload(Double download) {
+        this.download = download;
+    }
+
+    public Double getSystemLoad() {
+        return systemLoad;
+    }
+
+    public void setSystemLoad(Double systemLoad) {
+        this.systemLoad = systemLoad;
+    }
+
+    public Double getCpuUsage() {
+        return cpuUsage;
+    }
+
+    public void setCpuUsage(Double cpuUsage) {
+        this.cpuUsage = cpuUsage;
     }
 
     public Long getStartTime() {
