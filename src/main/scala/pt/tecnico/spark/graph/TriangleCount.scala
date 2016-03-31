@@ -13,7 +13,8 @@ object TriangleCount {
 
     val input = args(0)
     val output = args(1)
-    val statsDir = if (args.length > 2) args(2) else "stats"
+    val noPartitions = if (args.length > 2) args(2).toInt else -1
+    val statsDir = if (args.length > 3) args(3) else "stats"
 
     val conf = new SparkConf().setAppName("TriangleCount With Barrier")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
@@ -22,7 +23,7 @@ object TriangleCount {
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val graph = GraphLoader.edgeListFile(sc, input, canonicalOrientation = true)
+    val graph = GraphLoader.edgeListFile(sc, input, canonicalOrientation = true, numEdgePartitions = noPartitions)
       .partitionBy(PartitionStrategy.RandomVertexCut)
 
     // Find the triangle count for each vertex
