@@ -3,20 +3,43 @@ package pt.tecnico.postprocessing
 import java.io.{File, FileReader, FileWriter}
 import java.util.regex.Pattern
 
+import com.google.common.io.PatternFilenameFilter
+import org.jfree.chart.{ChartFactory, ChartUtilities}
 import org.supercsv.cellprocessor.constraint.NotNull
 import org.supercsv.cellprocessor._
 import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
 import pt.tecnico.spark.util.StageRuntimeStatistic
 import net.stamfest.rrd._
+import org.jfree.data.category.DefaultCategoryDataset
 import org.supercsv.cellprocessor.ift.CellProcessor
 
-import scala.collection.mutable
 
 /**
   * Created by dikei on 3/15/16.
   */
 object StageRuntimeAnalyzer {
+  val processors = Array (
+    new ParseInt(), // Stage Id
+    new NotNull(), // Stage Name
+    new ParseInt(), // Task count
+    new ParseLong(), // Total task runtime
+    new ParseLong(), // Stage runtime
+    new ParseLong(), // Fetch wait time
+    new ParseLong(), // Shuffle write time
+    new ParseLong(), // Average task time
+    new ParseLong(), // Fastest task
+    new ParseLong(), // Slowest task
+    new ParseLong(), // Standard deviation
+    new ParseLong(), // 5 percentile
+    new ParseLong(), // 25 percentile
+    new ParseLong(), // Median
+    new ParseLong(), // 75 percentile
+    new ParseLong(), // 95 percentile
+    new ParseLong(), // Start time
+    new ParseLong() // Completion time
+  )
+
   def main(args: Array[String]): Unit = {
     if (args.length < 3) {
       println("Usage: ")
@@ -27,30 +50,10 @@ object StageRuntimeAnalyzer {
     val statsDir = args(0)
     val rrdFile = args(1)
     val outFile = args(2)
-    val files = new File(statsDir).listFiles()
-
-    val processors = Array (
-      new ParseInt(), // Stage Id
-      new NotNull(), // Stage Name
-      new ParseInt(), // Task count
-      new ParseLong(), // Total task runtime
-      new ParseLong(), // Stage runtime
-      new ParseLong(), // Fetch wait time
-      new ParseLong(), // Shuffle write time
-      new ParseLong(), // Average task time
-      new ParseLong(), // Fastest task
-      new ParseLong(), // Slowest task
-      new ParseLong(), // Standard deviation
-      new ParseLong(), // 5 percentile
-      new ParseLong(), // 25 percentile
-      new ParseLong(), // Median
-      new ParseLong(), // 75 percentile
-      new ParseLong(), // 95 percentile
-      new ParseLong(), // Start time
-      new ParseLong() // Completion time
-    )
-
+    val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.csv$"))
     val rrdParser = new RRDp(".", null)
+    val cpuPattern = Pattern.compile("cpu\\/percent-idle.rrd")
+    val networkPattern = Pattern.compile("interface-eth0\\/if_octets.rrd")
 
     val average : Array[StageRuntimeStatistic] = files.flatMap { f =>
       val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
@@ -65,9 +68,7 @@ object StageRuntimeAnalyzer {
     .groupBy(_.getStageId)
     .map { case (stageId, runs) =>
       val validRuns = runs.map { case (s: StageRuntimeStatistic) =>
-        val cpuPattern = Pattern.compile("cpu\\/percent-idle.rrd")
         val loadPattern = Pattern.compile("load\\/load.rrd")
-        val networkPattern = Pattern.compile("interface-eth0\\/if_octets.rrd")
         val startDir = new File(rrdFile)
         s.setCpuUsage(
           100 - computeClusterAverage(
@@ -113,7 +114,6 @@ object StageRuntimeAnalyzer {
       }.filter { s =>
         !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
       }
-      println("Valid runs: " + validRuns.length)
       val total = validRuns.reduce[StageRuntimeStatistic] { case (s1: StageRuntimeStatistic, s2: StageRuntimeStatistic) =>
         new StageRuntimeStatistic(
           stageId,
@@ -190,6 +190,47 @@ object StageRuntimeAnalyzer {
       writer.close()
     }
 
+    // Plot CPU graph
+    plotCpuGraph(rrdFile, files, rrdParser, cpuPattern)
+
+    // Plot network graph
+    plotNetworkGraph(rrdFile, files, rrdParser, networkPattern)
+  }
+
+  def plotCpuGraph(rrdFile: String, files: Array[File], rrdParser: RRDp, cpuPattern: Pattern): Unit = {
+    files.foreach { f =>
+      val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
+      val stages = try {
+        val headers = reader.getHeader(true)
+        Iterator.continually[StageRuntimeStatistic](reader.read(classOf[StageRuntimeStatistic], headers, processors: _*))
+          .takeWhile(_ != null).toArray[StageRuntimeStatistic]
+      } finally {
+        reader.close()
+      }
+
+      val start = stages.map(_.getStartTime).min
+      val end = stages.map(_.getCompletionTime).max
+      val rrdFiles = findRrd(new File(rrdFile), cpuPattern)
+      plotCpuGraphPerRun(rrdParser, rrdFiles, f.getAbsolutePath, start, end)
+    }
+  }
+
+  def plotNetworkGraph(rrdFile: String, files: Array[File], rrdParser: RRDp, networkPattern: Pattern): Unit = {
+    files.foreach { f =>
+      val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
+      val stages = try {
+        val headers = reader.getHeader(true)
+        Iterator.continually[StageRuntimeStatistic](reader.read(classOf[StageRuntimeStatistic], headers, processors: _*))
+          .takeWhile(_ != null).toArray[StageRuntimeStatistic]
+      } finally {
+        reader.close()
+      }
+
+      val start = stages.map(_.getStartTime).min
+      val end = stages.map(_.getCompletionTime).max
+      val rrdFiles = findRrd(new File(rrdFile), networkPattern)
+      plotNetworkGraphPerRun(rrdParser, rrdFiles, f.getAbsolutePath, start, end)
+    }
   }
 
   def findRrd(startDir: File, p: Pattern): Array[File] = {
@@ -323,5 +364,89 @@ object StageRuntimeAnalyzer {
     } else {
       Double.NaN
     }
+  }
+
+  def plotCpuGraphPerRun(rrdParser: RRDp, files: Array[File], outputPrefix: String, startTime: Long, endTime: Long): Unit = {
+    val dataset = new DefaultCategoryDataset
+    files.flatMap { file =>
+      val command = Array[String] (
+        "fetch", file.getPath, "AVERAGE",
+        "-s", (startTime / 1000).toString,
+        "-e", (endTime / 1000).toString
+      )
+      val rddResult = rrdParser.command(command)
+      rddResult.getOutput.trim().split("\n")
+        .filter { line =>
+          line.contains(":") && !line.contains("nan")
+        }
+        .map { line =>
+          val tokens = line.split(":")
+          val idle = tokens(1).trim().toDouble
+          val time = tokens(0).toLong
+          (time - startTime, 100 - idle)
+        }
+    }
+    .groupBy(t => t._1)
+    .filter(t => t._2.length > 6)
+    .foreach { case (time: Long, idle: Array[(Long, Double)]) =>
+      val totalCpu = idle.map(_._2)
+      val averageCpu = totalCpu.sum / totalCpu.length
+      dataset.addValue(averageCpu, "Usage", time)
+    }
+
+    val lineChart = new File( s"$outputPrefix-cpu.png" )
+    val width = 1280
+    val height = 960
+    val chartFactory = ChartFactory.createLineChart(
+      "CPU",
+      "Time",
+      "Usage",
+      dataset
+    )
+    ChartUtilities.saveChartAsPNG(lineChart , chartFactory, width ,height)
+  }
+
+  def plotNetworkGraphPerRun(rrdParser: RRDp, files: Array[File], outputPrefix: String, startTime: Long, endTime: Long): Unit = {
+    val dataset = new DefaultCategoryDataset
+    files.flatMap { file =>
+      val command = Array[String] (
+        "fetch", file.getPath, "AVERAGE",
+        "-s", (startTime / 1000).toString,
+        "-e", (endTime / 1000).toString
+      )
+      val rddResult = rrdParser.command(command)
+      rddResult.getOutput.trim().split("\n")
+        .filter { line =>
+          line.contains(":") && !line.contains("nan")
+        }
+        .map { line =>
+          val tokens = line.split(":|\\s")
+          val download = tokens(2).trim().toDouble
+          val upload = tokens(3).trim().toDouble
+          val time = tokens(0).toLong
+          (time - startTime, upload, download)
+        }
+    }
+    .groupBy(t => t._1)
+    .filter(t => t._2.length > 6)
+    .foreach { case (time: Long, idle: Array[(Long, Double, Double)]) =>
+      val totalUpload = idle.map(_._2)
+      val totalDownload = idle.map(_._3)
+      val averageUpload = totalUpload.sum / totalUpload.length
+      val averageDownload = totalDownload.sum / totalDownload.length
+      dataset.addValue(averageUpload, "Upload", time)
+      dataset.addValue(averageDownload, "Download", time)
+    }
+
+    val lineChart = new File( s"$outputPrefix-network.png" )
+    val width = 1280
+    val height = 960
+    val chartFactory = ChartFactory.createLineChart(
+      "Network",
+      "Time",
+      "Average speed (byte/s)",
+      dataset
+    )
+    ChartUtilities.saveChartAsPNG(lineChart , chartFactory, width ,height)
   }
 }
