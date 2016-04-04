@@ -368,7 +368,7 @@ object StageRuntimeAnalyzer {
 
   def plotCpuGraphPerRun(rrdParser: RRDp, files: Array[File], outputPrefix: String, startTime: Long, endTime: Long): Unit = {
     val dataset = new DefaultCategoryDataset
-    files.flatMap { file =>
+    val points = files.flatMap { file =>
       val command = Array[String] (
         "fetch", file.getPath, "AVERAGE",
         "-s", (startTime / 1000).toString,
@@ -388,7 +388,10 @@ object StageRuntimeAnalyzer {
     }
     .groupBy(t => t._1)
     .filter(t => t._2.length > 6)
-    .foreach { case (time: Long, idle: Array[(Long, Double)]) =>
+    
+    println(s"Time points: ${points.size}")
+
+    points.foreach { case (time: Long, idle: Array[(Long, Double)]) =>
       val totalCpu = idle.map(_._2)
       val averageCpu = totalCpu.sum / totalCpu.length
       dataset.addValue(averageCpu, "Usage", time)
