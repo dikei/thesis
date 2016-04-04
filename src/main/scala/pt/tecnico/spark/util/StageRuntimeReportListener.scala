@@ -4,10 +4,10 @@ import java.io.{File, FileWriter}
 import java.text.SimpleDateFormat
 import java.util.Calendar
 
-import org.apache.spark.{SparkEnv, Logging}
+import org.apache.spark.{Logging, SparkEnv}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.scheduler._
-import org.supercsv.cellprocessor.ift.CellProcessor
+import org.apache.spark.scheduler.cluster.ExecutorInfo
 import org.supercsv.io.{CsvBeanWriter, ICsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
 
@@ -18,8 +18,12 @@ import scala.collection.mutable
   */
 class StageRuntimeReportListener(statisticDir: String) extends SparkListener with Logging{
 
-  private val taskInfoMetrics = mutable.HashMap[Int, mutable.Buffer[(TaskInfo, TaskMetrics)]]()
+  private var freeCores = 0
+  private var totalCores = 0
 
+  private val timers = mutable.HashMap[Int, Timer]()
+  private val taskInfoMetrics = mutable.HashMap[Int, mutable.Buffer[(TaskInfo, TaskMetrics)]]()
+  private val executors = mutable.HashMap[String, ExecutorInfo]()
   private val now = Calendar.getInstance()
   private val dateFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss")
   private val timeStamp = dateFormat.format(now.getTime)
@@ -40,7 +44,10 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     * Called when a stage is submitted
     */
   override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+    val timer = new Timer
     taskInfoMetrics += stageSubmitted.stageInfo.stageId -> mutable.Buffer[(TaskInfo, TaskMetrics)]()
+    timers += stageSubmitted.stageInfo.stageId -> timer
+    timer.start()
   }
 
   /**
@@ -142,14 +149,27 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     csvWriter.write(taskRuntimeStats, headers:_*)
     csvWriter.flush()
 
+    val cpuIdle = timers(info.stageId).elapsed
+    log.info("Executor idle time: {}", cpuIdle)
+
     // Clear out the buffer to save memory
     taskInfoMetrics.remove(info.stageId)
+    timers(info.stageId).reset()
+  }
+
+  override def onTaskStart(taskStart: SparkListenerTaskStart): Unit = {
+    freeCores -= 1
+    if (freeCores < 1) {
+      timers(taskStart.stageId).pause()
+    }
   }
 
   /**
     * Save each task info and metrics
     */
   override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
+    freeCores += 1
+    timers(taskEnd.stageId).start()
     for (buffer <- taskInfoMetrics.get(taskEnd.stageId)) {
       if (taskEnd.taskInfo != null && taskEnd.taskMetrics != null) {
         buffer += ((taskEnd.taskInfo, taskEnd.taskMetrics))
@@ -157,10 +177,43 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     }
   }
 
+  override def onExecutorAdded(executorAdded: SparkListenerExecutorAdded): Unit = {
+    totalCores += executorAdded.executorInfo.totalCores
+    freeCores += executorAdded.executorInfo.totalCores
+    executors += executorAdded.executorId -> executorAdded.executorInfo
+  }
+
+
+  override def onExecutorRemoved(executorRemoved: SparkListenerExecutorRemoved): Unit = {
+    val removedExecutor = executors(executorRemoved.executorId)
+    totalCores -= removedExecutor.totalCores
+    executors -= executorRemoved.executorId
+  }
+
   /**
     * Called when the application ends
     */
   override def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd): Unit = {
     csvWriter.close()
+  }
+}
+
+class Timer {
+  var startTime = 0L
+  var started = false
+  var elapsed = 0L
+
+  def start(): Unit = {
+    started = true
+    startTime = System.currentTimeMillis()
+  }
+
+  def pause(): Unit = {
+    started = false
+    elapsed += System.currentTimeMillis() - startTime
+  }
+
+  def reset(): Unit = {
+    elapsed = 0L
   }
 }
