@@ -1,17 +1,27 @@
 package pt.tecnico.postprocessing
 
+import java.awt.{Color, Font, Rectangle}
 import java.io.{File, FileReader, FileWriter}
+import java.util.Date
 import java.util.regex.Pattern
 
 import com.google.common.io.PatternFilenameFilter
-import org.jfree.chart.{ChartFactory, ChartUtilities}
+import com.itextpdf.awt.PdfGraphics2D
+import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart, StandardChartTheme}
 import org.supercsv.cellprocessor.constraint.NotNull
 import org.supercsv.cellprocessor._
 import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
 import pt.tecnico.spark.util.StageRuntimeStatistic
 import net.stamfest.rrd._
+import org.jfree.chart.axis.{CategoryAxis, NumberAxis}
+import org.jfree.chart.plot._
+import org.jfree.chart.renderer.category.LineAndShapeRenderer
 import org.jfree.data.category.DefaultCategoryDataset
+import org.jfree.data.time.{Millisecond, Second, TimeSeries, TimeSeriesCollection}
+import org.jfree.data.xy.DefaultXYDataset
+import org.jfree.graphics2d.svg.{SVGGraphics2D, SVGUtils}
+import org.jfree.ui.RectangleInsets
 import org.supercsv.cellprocessor.ift.CellProcessor
 
 
@@ -38,6 +48,14 @@ object StageRuntimeAnalyzer {
     new ParseLong(), // 95 percentile
     new ParseLong(), // Start time
     new ParseLong() // Completion time
+  )
+
+  val labelFont = new Font("Dialog", Font.PLAIN, 25)
+  val colors = Array (
+    Color.BLUE,
+    Color.GREEN,
+    Color.ORANGE,
+    Color.MAGENTA
   )
 
   def main(args: Array[String]): Unit = {
@@ -210,8 +228,9 @@ object StageRuntimeAnalyzer {
 
       val start = stages.map(_.getStartTime).min
       val end = stages.map(_.getCompletionTime).max
+      val stagesDuration = stages.map(s => (s.getStageId, s.getStartTime.toLong, s.getCompletionTime.toLong))
       val rrdFiles = findRrd(new File(rrdFile), cpuPattern)
-      plotCpuGraphPerRun(rrdParser, rrdFiles, f.getAbsolutePath, start, end)
+      plotCpuGraphPerRun(rrdParser, rrdFiles, f.getAbsolutePath, start, end, stagesDuration)
     }
   }
 
@@ -228,8 +247,9 @@ object StageRuntimeAnalyzer {
 
       val start = stages.map(_.getStartTime).min
       val end = stages.map(_.getCompletionTime).max
+      val stagesDuration = stages.map(s => (s.getStageId, s.getStartTime.toLong, s.getCompletionTime.toLong))
       val rrdFiles = findRrd(new File(rrdFile), networkPattern)
-      plotNetworkGraphPerRun(rrdParser, rrdFiles, f.getAbsolutePath, start, end)
+      plotNetworkGraphPerRun(rrdParser, rrdFiles, f.getAbsolutePath, start, end, stagesDuration)
     }
   }
 
@@ -366,8 +386,15 @@ object StageRuntimeAnalyzer {
     }
   }
 
-  def plotCpuGraphPerRun(rrdParser: RRDp, files: Array[File], outputPrefix: String, startTime: Long, endTime: Long): Unit = {
-    val dataset = new DefaultCategoryDataset
+  def plotCpuGraphPerRun(
+      rrdParser: RRDp,
+      files: Array[File],
+      outputPrefix: String,
+      startTime: Long,
+      endTime: Long,
+      stagesDuration: Array[(Integer, Long, Long)],
+      average: Boolean = false): Unit = {
+
     val points = files.flatMap { file =>
       val command = Array[String] (
         "fetch", file.getPath, "AVERAGE",
@@ -383,35 +410,70 @@ object StageRuntimeAnalyzer {
           val tokens = line.split(":")
           val idle = tokens(1).trim().toDouble
           val time = tokens(0).toLong
-          (time - startTime, 100 - idle)
+          (time * 1000, 100 - idle, file.getParentFile.getParentFile.getName)
         }
     }
     .groupBy(t => t._1)
-    .filter(t => t._2.length > 6)
-    
-    println(s"Time points: ${points.size}")
 
-    points.foreach { case (time: Long, idle: Array[(Long, Double)]) =>
-      val totalCpu = idle.map(_._2)
-      val averageCpu = totalCpu.sum / totalCpu.length
-      dataset.addValue(averageCpu, "Usage", time)
+    val dataset = new TimeSeriesCollection
+    if (average) {
+      val series = new TimeSeries("Average Cluster")
+      points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
+        val totalCpu = machines.map(_._2).sum
+        val averageCpu = totalCpu / machines.length
+        series.add(new Millisecond(new Date(time)), averageCpu)
+      }
+      dataset.addSeries(series)
+    } else {
+      val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
+      points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
+        machines.foreach { case (_, cpu, machine) =>
+          seriesMap.getOrElseUpdate(machine, new TimeSeries(machine)).add(new Millisecond(new Date(time)), cpu)
+        }
+      }
+      seriesMap.foreach { case (_, series) =>
+        dataset.addSeries(series)
+      }
     }
 
     val lineChart = new File( s"$outputPrefix-cpu.png" )
     val width = 1280
     val height = 960
-    val chartFactory = ChartFactory.createLineChart(
+    val chartFactory = ChartFactory.createXYLineChart(
       "CPU",
       "Time",
       "Usage",
       dataset
     )
-    ChartUtilities.saveChartAsPNG(lineChart , chartFactory, width ,height)
+    val plot = chartFactory.getXYPlot
+    stagesDuration.sortBy(_._2).zipWithIndex.foreach { case ((id, start, end), index) =>
+      val intervalMarker = new IntervalMarker(start, end)
+      intervalMarker.setLabel(id.toString)
+      intervalMarker.setAlpha(0.1f)
+      intervalMarker.setLabelFont(labelFont)
+      intervalMarker.setPaint(colors(index % colors.length))
+      if (index % 2 == 0) {
+        intervalMarker.setLabelOffset(new RectangleInsets(15, 0, 0, 0))
+      } else {
+        intervalMarker.setLabelOffset(new RectangleInsets(50, 0, 0, 0))
+      }
+      plot.addDomainMarker(intervalMarker)
+    }
+//    val svg = new SVGGraphics2D(width, height)
+//    chartFactory.draw(svg, new Rectangle(0, 0, width, height))
+//    SVGUtils.writeToSVG(lineChart, svg.getSVGElement())
+    ChartUtilities.saveChartAsPNG(lineChart, chartFactory, width, height)
   }
 
-  def plotNetworkGraphPerRun(rrdParser: RRDp, files: Array[File], outputPrefix: String, startTime: Long, endTime: Long): Unit = {
-    val dataset = new DefaultCategoryDataset
-    files.flatMap { file =>
+  def plotNetworkGraphPerRun(
+      rrdParser: RRDp,
+      files: Array[File],
+      outputPrefix: String,
+      startTime: Long,
+      endTime: Long,
+      stagesDuration: Array[(Integer, Long, Long)],
+      average: Boolean = false): Unit = {
+    val points = files.flatMap { file =>
       val command = Array[String] (
         "fetch", file.getPath, "AVERAGE",
         "-s", (startTime / 1000).toString,
@@ -427,29 +489,66 @@ object StageRuntimeAnalyzer {
           val download = tokens(2).trim().toDouble
           val upload = tokens(3).trim().toDouble
           val time = tokens(0).toLong
-          (time - startTime, upload, download)
+          (time * 1000, upload, download, file.getParentFile.getParentFile.getName)
         }
     }
     .groupBy(t => t._1)
-    .filter(t => t._2.length > 6)
-    .foreach { case (time: Long, idle: Array[(Long, Double, Double)]) =>
-      val totalUpload = idle.map(_._2)
-      val totalDownload = idle.map(_._3)
-      val averageUpload = totalUpload.sum / totalUpload.length
-      val averageDownload = totalDownload.sum / totalDownload.length
-      dataset.addValue(averageUpload, "Upload", time)
-      dataset.addValue(averageDownload, "Download", time)
+
+    val dataset = new TimeSeriesCollection
+    if (average) {
+      val downloadSeries = new TimeSeries("Download")
+      val uploadSeries = new TimeSeries("Upload")
+      points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
+        val totalUpload = machines.map(_._2)
+        val totalDownload = machines.map(_._3)
+        val averageUpload = totalUpload.sum / totalUpload.length
+        val averageDownload = totalDownload.sum / totalDownload.length
+        downloadSeries.add(new Millisecond(new Date(time)), averageDownload)
+        uploadSeries.add(new Millisecond(new Date(time)), averageUpload)
+      }
+      dataset.addSeries(uploadSeries)
+      dataset.addSeries(downloadSeries)
+    } else {
+      val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
+      points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
+        machines.foreach { case (_, upload, download, machine) =>
+          seriesMap.getOrElseUpdate(s"$machine-Upload", new TimeSeries(s"$machine-Upload"))
+            .add(new Millisecond(new Date(time)), upload)
+          seriesMap.getOrElseUpdate(s"$machine-Download", new TimeSeries(s"$machine-Download"))
+            .add(new Millisecond(new Date(time)), download)
+        }
+      }
+      seriesMap.foreach { case (_, series) =>
+        dataset.addSeries(series)
+      }
     }
 
     val lineChart = new File( s"$outputPrefix-network.png" )
     val width = 1280
     val height = 960
-    val chartFactory = ChartFactory.createLineChart(
+    val chartFactory = ChartFactory.createTimeSeriesChart(
       "Network",
       "Time",
       "Average speed (byte/s)",
       dataset
     )
-    ChartUtilities.saveChartAsPNG(lineChart , chartFactory, width ,height)
+    val plot = chartFactory.getXYPlot
+    stagesDuration.sortBy(_._2).zipWithIndex.foreach { case ((id, start, end), index) =>
+      val intervalMarker = new IntervalMarker(start, end)
+      intervalMarker.setLabel(id.toString)
+      intervalMarker.setAlpha(0.1f)
+      intervalMarker.setLabelFont(labelFont)
+      intervalMarker.setPaint(colors(index % colors.length))
+      if (index % 2 == 0) {
+        intervalMarker.setLabelOffset(new RectangleInsets(15, 0, 0, 0))
+      } else {
+        intervalMarker.setLabelOffset(new RectangleInsets(50, 0, 0, 0))
+      }
+      plot.addDomainMarker(intervalMarker)
+    }
+//    val svg = new SVGGraphics2D(width, height)
+//    chartFactory.draw(svg, new Rectangle(0, 0, width, height))
+//    SVGUtils.writeToSVG(lineChart, svg.getSVGElement())
+    ChartUtilities.saveChartAsPNG(lineChart, chartFactory, width, height)
   }
 }
