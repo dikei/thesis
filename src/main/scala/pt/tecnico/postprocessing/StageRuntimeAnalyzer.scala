@@ -1,28 +1,22 @@
 package pt.tecnico.postprocessing
 
-import java.awt.{Color, Font, Rectangle}
+import java.awt.{Color, Font}
 import java.io.{File, FileReader, FileWriter}
 import java.util.Date
 import java.util.regex.Pattern
 
 import com.google.common.io.PatternFilenameFilter
-import com.itextpdf.awt.PdfGraphics2D
-import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart, StandardChartTheme}
-import org.supercsv.cellprocessor.constraint.NotNull
+import net.stamfest.rrd._
+import org.jfree.chart.plot._
+import org.jfree.chart.{ChartFactory, ChartUtilities}
+import org.jfree.data.time.{Millisecond, TimeSeries, TimeSeriesCollection}
+import org.jfree.ui.RectangleInsets
 import org.supercsv.cellprocessor._
+import org.supercsv.cellprocessor.constraint.NotNull
+import org.supercsv.cellprocessor.ift.CellProcessor
 import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
 import pt.tecnico.spark.util.StageRuntimeStatistic
-import net.stamfest.rrd._
-import org.jfree.chart.axis.{CategoryAxis, NumberAxis}
-import org.jfree.chart.plot._
-import org.jfree.chart.renderer.category.LineAndShapeRenderer
-import org.jfree.data.category.DefaultCategoryDataset
-import org.jfree.data.time.{Millisecond, Second, TimeSeries, TimeSeriesCollection}
-import org.jfree.data.xy.DefaultXYDataset
-import org.jfree.graphics2d.svg.{SVGGraphics2D, SVGUtils}
-import org.jfree.ui.RectangleInsets
-import org.supercsv.cellprocessor.ift.CellProcessor
 
 
 /**
