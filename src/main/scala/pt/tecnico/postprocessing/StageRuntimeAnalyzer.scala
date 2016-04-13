@@ -9,7 +9,7 @@ import com.google.common.io.PatternFilenameFilter
 import net.stamfest.rrd._
 import org.jfree.chart.plot._
 import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart}
-import org.jfree.data.time.{Millisecond, Second, TimeSeries, TimeSeriesCollection}
+import org.jfree.data.time.{Second, TimeSeries, TimeSeriesCollection}
 import org.jfree.ui.RectangleInsets
 import org.supercsv.cellprocessor._
 import org.supercsv.cellprocessor.constraint.NotNull
@@ -420,7 +420,7 @@ object StageRuntimeAnalyzer {
       }
     }
 
-    val chart = ChartFactory.createXYLineChart(
+    val chart = ChartFactory.createTimeSeriesChart(
       "CPU",
       "Time",
       "Usage",
@@ -567,7 +567,6 @@ object StageRuntimeAnalyzer {
   }
 
   def drawChart(chart: JFreeChart, output: File, stagesDuration: Array[(Integer, Long, Long)]): Unit = {
-
     val width = 1280
     val height = 960
     val plot = chart.getXYPlot
