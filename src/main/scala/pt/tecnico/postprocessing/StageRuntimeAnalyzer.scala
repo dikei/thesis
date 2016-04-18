@@ -67,7 +67,7 @@ object StageRuntimeAnalyzer {
     val cpuPattern = Pattern.compile("cpu\\/percent-idle.rrd")
     val networkPattern = Pattern.compile("interface-eth0\\/if_octets.rrd")
     val diskPattern = Pattern.compile("disk-vda1\\/disk_octets.rrd")
-    val average : Array[StageRuntimeStatistic] = files.flatMap { f =>
+    val filesData = files.map { f =>
       val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
       try {
         val headers = reader.getHeader(true)
@@ -77,7 +77,15 @@ object StageRuntimeAnalyzer {
         reader.close()
       }
     }
-    .groupBy(_.getStageId)
+    val totalRuntimes = filesData.map { run =>
+      val startTime = run.map(_.getCompletionTime).min
+      val endTime = run.map(_.getCompletionTime).max
+      endTime - startTime
+    }
+    val averageRuntime = totalRuntimes.sum / totalRuntimes.length
+    println(s"Average runtime: $averageRuntime")
+
+    val average = filesData.flatMap(run => run).groupBy(_.getStageId)
     .map { case (stageId, runs) =>
       val validRuns = runs.map { case (s: StageRuntimeStatistic) =>
         val loadPattern = Pattern.compile("load\\/load.rrd")
