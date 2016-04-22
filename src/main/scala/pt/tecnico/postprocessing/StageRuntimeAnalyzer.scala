@@ -7,7 +7,10 @@ import java.util.regex.Pattern
 
 import com.google.common.io.PatternFilenameFilter
 import net.stamfest.rrd._
+import org.jfree.chart.axis._
 import org.jfree.chart.plot._
+import org.jfree.chart.renderer.xy.StandardXYItemRenderer
+import org.jfree.chart.util.RelativeDateFormat
 import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart}
 import org.jfree.data.time.{Second, TimeSeries, TimeSeriesCollection}
 import org.jfree.ui.RectangleInsets
@@ -17,6 +20,8 @@ import org.supercsv.cellprocessor.ift.CellProcessor
 import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
 import pt.tecnico.spark.util.StageRuntimeStatistic
+
+import scala.collection.mutable.ArrayBuffer
 
 
 /**
@@ -66,7 +71,7 @@ object StageRuntimeAnalyzer {
     val rrdParser = new RRDp(".", null)
     val cpuPattern = Pattern.compile("cpu\\/percent-idle.rrd")
     val networkPattern = Pattern.compile("interface-eth0\\/if_octets.rrd")
-    val diskPattern = Pattern.compile("disk-vda1\\/disk_octets.rrd")
+    val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time.rrd")
     val filesData = files.map { f =>
       val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
       try {
@@ -206,17 +211,23 @@ object StageRuntimeAnalyzer {
       average.foreach { stage =>
         writer.write(stage, headers, writeProcessors)
       }
+      writer.writeComment("#")
+      writer.writeComment(s"#Total runtime: $averageRuntime ms")
+      writer.writeComment("#")
     } finally {
       writer.close()
     }
 
     // Plot CPU graph
+    println("Plotting CPU graph")
     plotGraph(rrdFile, files, rrdParser, cpuPattern, plotCpuGraphPerRun)
 
     // Plot network graph
+    println("Plotting network graph")
     plotGraph(rrdFile, files, rrdParser, networkPattern, plotNetworkGraphPerRun)
 
     // Plot diskgraph
+    println("Plotting disk IO graph")
     plotGraph(rrdFile, files, rrdParser, diskPattern, plotDiskGraphPerRun)
   }
 
@@ -407,7 +418,7 @@ object StageRuntimeAnalyzer {
     }
     .groupBy(t => t._1)
 
-    val dataset = new TimeSeriesCollection
+    val datasets = new ArrayBuffer[TimeSeriesCollection]()
     if (average) {
       val series = new TimeSeries("Average Cluster")
       points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
@@ -415,7 +426,7 @@ object StageRuntimeAnalyzer {
         val averageCpu = totalCpu / machines.length
         series.add(new Second(new Date(time)), averageCpu)
       }
-      dataset.addSeries(series)
+      datasets += new TimeSeriesCollection(series)
     } else {
       val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
       points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
@@ -424,18 +435,12 @@ object StageRuntimeAnalyzer {
         }
       }
       seriesMap.foreach { case (_, series) =>
-        dataset.addSeries(series)
+        datasets += new TimeSeriesCollection(series)
       }
     }
 
-    val chart = ChartFactory.createTimeSeriesChart(
-      "CPU",
-      "Time",
-      "Usage",
-      dataset
-    )
     val output = new File( s"$outputPrefix-cpu.png" )
-    drawChart(chart, output, stagesDuration)
+    drawChart(output, stagesDuration, datasets.toArray, "CPU", "Time", "Usage (%)", startTime, endTime)
   }
 
   def plotNetworkGraphPerRun(
@@ -467,7 +472,7 @@ object StageRuntimeAnalyzer {
     }
     .groupBy(t => t._1)
 
-    val dataset = new TimeSeriesCollection
+    val datasets = new ArrayBuffer[TimeSeriesCollection]()
     if (average) {
       val downloadSeries = new TimeSeries("Download")
       val uploadSeries = new TimeSeries("Upload")
@@ -479,31 +484,33 @@ object StageRuntimeAnalyzer {
         downloadSeries.add(new Second(new Date(time)), averageDownload)
         uploadSeries.add(new Second(new Date(time)), averageUpload)
       }
+      val dataset = new TimeSeriesCollection
       dataset.addSeries(uploadSeries)
       dataset.addSeries(downloadSeries)
+      datasets += dataset
     } else {
-      val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
+      val seriesMap = new scala.collection.mutable.HashMap[String, (TimeSeries, TimeSeries)]
       points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
         machines.foreach { case (_, upload, download, machine) =>
-          seriesMap.getOrElseUpdate(s"$machine-Upload", new TimeSeries(s"$machine-Upload"))
-            .add(new Second(new Date(time)), upload)
-          seriesMap.getOrElseUpdate(s"$machine-Download", new TimeSeries(s"$machine-Download"))
-            .add(new Second(new Date(time)), download)
+          val uploadDownload =
+            seriesMap.getOrElseUpdate(
+              s"$machine",
+              (new TimeSeries(s"$machine-Upload"), new TimeSeries(s"$machine-Download"))
+            )
+          uploadDownload._1.add(new Second(new Date(time)), upload)
+          uploadDownload._2.add(new Second(new Date(time)), download)
         }
       }
-      seriesMap.foreach { case (_, series) =>
-        dataset.addSeries(series)
+      seriesMap.foreach { case (_, (uploadSeries, downloadSeries)) =>
+        val dataset = new TimeSeriesCollection
+        dataset.addSeries(uploadSeries)
+        dataset.addSeries(downloadSeries)
+        datasets += dataset
       }
     }
 
-    val chart = ChartFactory.createTimeSeriesChart(
-      "Network",
-      "Time",
-      "Average speed (byte/s)",
-      dataset
-    )
     val output = new File( s"$outputPrefix-network.png" )
-    drawChart(chart, output, stagesDuration)
+    drawChart(output, stagesDuration, datasets.toArray, "Network", "Time", "Bandwidth (bytes/s)", startTime, endTime)
   }
 
   def plotDiskGraphPerRun(
@@ -527,73 +534,100 @@ object StageRuntimeAnalyzer {
         }
         .map { line =>
           val tokens = line.split(":|\\s")
-          val read = tokens(2).trim().toDouble
-          val write = tokens(3).trim().toDouble
+          val ioTime = tokens(2).trim().toDouble
+          val weightedIoTime = tokens(3).trim().toDouble
           val time = tokens(0).toLong
-          (time * 1000, read, write, file.getParentFile.getParentFile.getName)
+          (time * 1000, ioTime, weightedIoTime, file.getParentFile.getParentFile.getName)
         }
     }
     .groupBy(t => t._1)
 
-    val dataset = new TimeSeriesCollection
+    val datasets = new ArrayBuffer[TimeSeriesCollection]()
     if (average) {
-      val readSeries = new TimeSeries("Average Read")
-      val writeSeries = new TimeSeries("Average Write")
+      val ioTimeSeries = new TimeSeries("Average IO Time")
+      val weightedIoTimeSeries = new TimeSeries("Average Weighted IO Write")
       points.foreach { case (time, machines) =>
-          val totalRead = machines.map(_._2).sum
-          val totalWrite = machines.map(_._3).sum
-          val averageRead = totalRead / machines.length
-          val averageWrite = totalWrite / machines.length
-          readSeries.add(new Second(new Date(time)), averageRead)
-          writeSeries.add(new Second(new Date(time)), averageWrite)
+          val totalIoTime = machines.map(_._2).sum
+          val totalWeightedIoTime = machines.map(_._3).sum
+          val averageIoTime = totalIoTime / machines.length
+          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
+          ioTimeSeries.add(new Second(new Date(time)), averageIoTime)
+//          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
       }
-      dataset.addSeries(readSeries)
-      dataset.addSeries(writeSeries)
+      val dataset = new TimeSeriesCollection
+      dataset.addSeries(ioTimeSeries)
+      dataset.addSeries(weightedIoTimeSeries)
+      datasets += dataset
     } else {
       val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
       points.foreach { case (time, machines) =>
-        machines.foreach { case (_, read, write, machine) =>
-          seriesMap.getOrElseUpdate(s"$machine-Read", new TimeSeries(s"$machine-Read"))
-            .add(new Second(new Date(time)), read)
-          seriesMap.getOrElseUpdate(s"$machine-Write", new TimeSeries(s"$machine-Write"))
-            .add(new Second(new Date(time)), write)
+        machines.foreach { case (_, ioTime, weightedIoTime, machine) =>
+          seriesMap.getOrElseUpdate(s"$machine-IoTime", new TimeSeries(s"$machine-IoTime"))
+            .add(new Second(new Date(time)), ioTime)
+//          seriesMap.getOrElseUpdate(s"$machine-WeightedIoTime", new TimeSeries(s"$machine-WeightedIoTime"))
+//            .add(new Second(new Date(time)), weightedIoTime)
         }
       }
       seriesMap.foreach { case (_, series) =>
-        dataset.addSeries(series)
+        datasets += new TimeSeriesCollection(series)
       }
     }
 
-    val chart = ChartFactory.createTimeSeriesChart(
-      "Disk",
-      "Time",
-      "Byte/s",
-      dataset
-    )
     val output = new File( s"$outputPrefix-disk.png" )
-    drawChart(chart, output, stagesDuration)
+    drawChart(output, stagesDuration, datasets.toArray, "Disk", "Time", "IO Time (ms)", startTime, endTime)
   }
 
-  def drawChart(chart: JFreeChart, output: File, stagesDuration: Array[(Integer, Long, Long)]): Unit = {
+  def drawChart(
+      output: File,
+      stagesDuration: Array[(Integer, Long, Long)],
+      datasets: Array[TimeSeriesCollection],
+      title: String,
+      timeAxisLabel: String,
+      valueAxisLabel: String,
+      startTime: Long,
+      endTime: Long): Unit = {
     val width = 1280
     val height = 960
-    val plot = chart.getXYPlot
-    stagesDuration.sortBy(_._2).zipWithIndex.foreach { case ((id, start, end), index) =>
-      val intervalMarker = new IntervalMarker(start, end)
-      intervalMarker.setLabel(id.toString)
-      intervalMarker.setAlpha(0.1f)
-      intervalMarker.setLabelFont(labelFont)
-      intervalMarker.setPaint(colors(index % colors.length))
-      if (index % 2 == 0) {
-        intervalMarker.setLabelOffset(new RectangleInsets(15, 0, 0, 0))
-      } else {
-        intervalMarker.setLabelOffset(new RectangleInsets(50, 0, 0, 0))
+
+    val dateFormat = new RelativeDateFormat(startTime)
+    val timeAxis = new DateAxis(timeAxisLabel)
+    timeAxis.setAutoRange(true)
+    timeAxis.setDateFormatOverride(dateFormat)
+    timeAxis.setMinimumDate(new Date(startTime))
+    timeAxis.setMaximumDate(new Date(endTime))
+    timeAxis.setLowerMargin(0.02)
+    timeAxis.setUpperMargin(0.02)
+
+
+    val valueAxis = new NumberAxis(valueAxisLabel)
+    valueAxis.setAutoRangeIncludesZero(false)
+
+    val combinedPlot = new CombinedDomainXYPlot(timeAxis)
+    combinedPlot.setOrientation(PlotOrientation.VERTICAL)
+
+    datasets.foreach { dataset =>
+      val plot = new XYPlot(dataset, timeAxis, valueAxis, new StandardXYItemRenderer)
+      stagesDuration.sortBy(_._2).zipWithIndex.foreach { case ((id, start, end), index) =>
+        val intervalMarker = new IntervalMarker(start, end)
+        intervalMarker.setLabel(id.toString)
+        intervalMarker.setAlpha(0.1f)
+        intervalMarker.setLabelFont(labelFont)
+        intervalMarker.setPaint(colors(index % colors.length))
+        if (index % 2 == 0) {
+          intervalMarker.setLabelOffset(new RectangleInsets(15, 0, 0, 0))
+        } else {
+          intervalMarker.setLabelOffset(new RectangleInsets(50, 0, 0, 0))
+        }
+        plot.addDomainMarker(intervalMarker)
       }
-      plot.addDomainMarker(intervalMarker)
+      combinedPlot.add(plot)
     }
+    val chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, combinedPlot, true)
+    ChartUtilities.saveChartAsPNG(output, chart, width, height)
+
     //    val svg = new SVGGraphics2D(width, height)
     //    chartFactory.draw(svg, new Rectangle(0, 0, width, height))
     //    SVGUtils.writeToSVG(lineChart, svg.getSVGElement())
-    ChartUtilities.saveChartAsPNG(output, chart, width, height)
+
   }
 }
