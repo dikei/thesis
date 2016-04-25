@@ -53,7 +53,7 @@ object TeraSort {
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
     val dataset = sc.newAPIHadoopFile[Array[Byte], Array[Byte], TeraInputFormat](inputFile)
-    val sorted = dataset.partitionBy(new TeraSortPartitioner(dataset.partitions.length)).sortByKey()
+    val sorted = dataset.repartitionAndSortWithinPartitions(new TeraSortPartitioner(dataset.partitions.length))
     sorted.saveAsNewAPIHadoopFile[TeraOutputFormat](outputFile)
   }
 }
