@@ -68,19 +68,22 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
       taskInfo.duration
     }
 
-    val fetchWaitTime = stageTaskInfoMetrics.map { case (taskInfo, taskMetric) =>
+    var fetchWaitTime: Long = 0
+    var shuffleWriteTime: Long = 0
+    var waitForPartialOutputTime: Long = 0
+    stageTaskInfoMetrics.foreach { case (taskInfo, taskMetric) =>
       taskMetric.shuffleReadMetrics match {
-        case Some(metric) => metric.fetchWaitTime
-        case None => 0
+        case Some(metric) =>
+          fetchWaitTime += metric.fetchWaitTime
+          waitForPartialOutputTime += metric.waitForPartialOutputTime
+        case _ =>
       }
-    }.sum
-
-    val shuffleWriteTime = stageTaskInfoMetrics.map { case (taskInfo, taskMetric) =>
       taskMetric.shuffleWriteMetrics match {
-        case Some(metric) => metric.shuffleWriteTime
-        case None => 0
+        case Some(metric) =>
+          shuffleWriteTime += metric.shuffleWriteTime
+        case _ =>
       }
-    }.sum
+    }
 
     var totalDuration = 0L
     var min = Long.MaxValue
@@ -125,6 +128,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     log.info("Median: {} ms", median)
     log.info("75th percentile: {} ms", percent75)
     log.info("95th percentile: {} ms", percent95)
+    log.info("Time block for partial map output: {} ms", waitForPartialOutputTime)
 
     val taskRuntimeStats = new StageRuntimeStatistic
     taskRuntimeStats.setStartTime(info.submissionTime.get)
@@ -143,9 +147,9 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     taskRuntimeStats.setPercent95(percent95)
     taskRuntimeStats.setTotalTaskRuntime(totalDuration)
     taskRuntimeStats.setStageRuntime(runtime)
-    taskRuntimeStats.setFetchWaitTime(fetchWaitTime / 1000000)
-    taskRuntimeStats.setShuffleWriteTime(shuffleWriteTime / 1000000)
-
+    taskRuntimeStats.setFetchWaitTime(fetchWaitTime)
+    taskRuntimeStats.setShuffleWriteTime(shuffleWriteTime)
+    taskRuntimeStats.setPartialOutputWaitTime(waitForPartialOutputTime)
     csvWriter.write(taskRuntimeStats, headers:_*)
     csvWriter.flush()
 

@@ -26,6 +26,7 @@ public class StageRuntimeStatistic {
     private Double systemLoad;
     private Double upload;
     private Double download;
+    private Long partialOutputWaitTime;
 
     public StageRuntimeStatistic() {
     }
@@ -70,6 +71,14 @@ public class StageRuntimeStatistic {
         this.systemLoad = systemLoad;
         this.upload = upload;
         this.download = download;
+    }
+
+    public Long getPartialOutputWaitTime() {
+        return partialOutputWaitTime;
+    }
+
+    public void setPartialOutputWaitTime(Long partialOutputWaitTime) {
+        this.partialOutputWaitTime = partialOutputWaitTime;
     }
 
     public Double getUpload() {
