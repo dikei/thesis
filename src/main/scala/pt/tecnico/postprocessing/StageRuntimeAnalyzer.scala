@@ -220,15 +220,15 @@ object StageRuntimeAnalyzer {
 
     // Plot CPU graph
     println("Plotting CPU graph")
-    plotGraph(rrdFile, files, rrdParser, cpuPattern, plotCpuGraphPerRun)
+    plotGraph(rrdFile, files, rrdParser, cpuPattern, plotCpuGraphPerRun, clusterAverage = true)
 
     // Plot network graph
     println("Plotting network graph")
-    plotGraph(rrdFile, files, rrdParser, networkPattern, plotNetworkGraphPerRun)
+    plotGraph(rrdFile, files, rrdParser, networkPattern, plotNetworkGraphPerRun, clusterAverage = true)
 
     // Plot diskgraph
     println("Plotting disk IO graph")
-    plotGraph(rrdFile, files, rrdParser, diskPattern, plotDiskGraphPerRun)
+    plotGraph(rrdFile, files, rrdParser, diskPattern, plotDiskGraphPerRun, clusterAverage = true)
   }
 
   def plotGraph(
@@ -427,16 +427,15 @@ object StageRuntimeAnalyzer {
         series.add(new Second(new Date(time)), averageCpu)
       }
       datasets += new TimeSeriesCollection(series)
-    } else {
-      val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
-      points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
-        machines.foreach { case (_, cpu, machine) =>
-          seriesMap.getOrElseUpdate(machine, new TimeSeries(machine)).add(new Second(new Date(time)), cpu)
-        }
+    }
+    val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
+    points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
+      machines.foreach { case (_, cpu, machine) =>
+        seriesMap.getOrElseUpdate(machine, new TimeSeries(machine)).add(new Second(new Date(time)), cpu)
       }
-      seriesMap.foreach { case (_, series) =>
-        datasets += new TimeSeriesCollection(series)
-      }
+    }
+    seriesMap.foreach { case (_, series) =>
+      datasets += new TimeSeriesCollection(series)
     }
 
     val output = new File( s"$outputPrefix-cpu.png" )
@@ -488,25 +487,25 @@ object StageRuntimeAnalyzer {
       dataset.addSeries(uploadSeries)
       dataset.addSeries(downloadSeries)
       datasets += dataset
-    } else {
-      val seriesMap = new scala.collection.mutable.HashMap[String, (TimeSeries, TimeSeries)]
-      points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
-        machines.foreach { case (_, upload, download, machine) =>
-          val uploadDownload =
-            seriesMap.getOrElseUpdate(
-              s"$machine",
-              (new TimeSeries(s"$machine-Upload"), new TimeSeries(s"$machine-Download"))
-            )
-          uploadDownload._1.add(new Second(new Date(time)), upload)
-          uploadDownload._2.add(new Second(new Date(time)), download)
-        }
+    }
+
+    val seriesMap = new scala.collection.mutable.HashMap[String, (TimeSeries, TimeSeries)]
+    points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
+      machines.foreach { case (_, upload, download, machine) =>
+        val uploadDownload =
+          seriesMap.getOrElseUpdate(
+            s"$machine",
+            (new TimeSeries(s"$machine-Upload"), new TimeSeries(s"$machine-Download"))
+          )
+        uploadDownload._1.add(new Second(new Date(time)), upload)
+        uploadDownload._2.add(new Second(new Date(time)), download)
       }
-      seriesMap.foreach { case (_, (uploadSeries, downloadSeries)) =>
-        val dataset = new TimeSeriesCollection
-        dataset.addSeries(uploadSeries)
-        dataset.addSeries(downloadSeries)
-        datasets += dataset
-      }
+    }
+    seriesMap.foreach { case (_, (uploadSeries, downloadSeries)) =>
+      val dataset = new TimeSeriesCollection
+      dataset.addSeries(uploadSeries)
+      dataset.addSeries(downloadSeries)
+      datasets += dataset
     }
 
     val output = new File( s"$outputPrefix-network.png" )
@@ -558,19 +557,18 @@ object StageRuntimeAnalyzer {
       dataset.addSeries(ioTimeSeries)
       dataset.addSeries(weightedIoTimeSeries)
       datasets += dataset
-    } else {
-      val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
-      points.foreach { case (time, machines) =>
-        machines.foreach { case (_, ioTime, weightedIoTime, machine) =>
-          seriesMap.getOrElseUpdate(s"$machine-IoTime", new TimeSeries(s"$machine-IoTime"))
-            .add(new Second(new Date(time)), ioTime)
+    }
+    val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
+    points.foreach { case (time, machines) =>
+      machines.foreach { case (_, ioTime, weightedIoTime, machine) =>
+        seriesMap.getOrElseUpdate(s"$machine-IoTime", new TimeSeries(s"$machine-IoTime"))
+          .add(new Second(new Date(time)), ioTime)
 //          seriesMap.getOrElseUpdate(s"$machine-WeightedIoTime", new TimeSeries(s"$machine-WeightedIoTime"))
 //            .add(new Second(new Date(time)), weightedIoTime)
-        }
       }
-      seriesMap.foreach { case (_, series) =>
-        datasets += new TimeSeriesCollection(series)
-      }
+    }
+    seriesMap.foreach { case (_, series) =>
+      datasets += new TimeSeriesCollection(series)
     }
 
     val output = new File( s"$outputPrefix-disk.png" )
