@@ -32,7 +32,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
 
   private val headers = Array (
     "StageId", "Name", "TaskCount", "TotalTaskRuntime", "StageRuntime", "FetchWaitTime", "ShuffleWriteTime",
-    "Average", "Fastest", "Slowest", "StandardDeviation",
+    "PartialOutputWaitTime", "Average", "Fastest", "Slowest", "StandardDeviation",
     "Percent5", "Percent25", "Median", "Percent75", "Percent95",
     "StartTime", "CompletionTime"
   )

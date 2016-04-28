@@ -36,6 +36,7 @@ object StageRuntimeAnalyzer {
     new ParseLong(), // Stage runtime
     new ParseLong(), // Fetch wait time
     new ParseLong(), // Shuffle write time
+    new ParseLong(), // Wait for partial output time
     new ParseLong(), // Average task time
     new ParseLong(), // Fastest task
     new ParseLong(), // Slowest task
