@@ -52,10 +52,10 @@ object StageRuntimeAnalyzer {
 
   val labelFont = new Font("Dialog", Font.PLAIN, 25)
   val colors = Array (
-    Color.BLUE,
-    Color.GREEN,
-    Color.ORANGE,
-    Color.MAGENTA
+    new Color(230,97,1),
+    new Color(253,184,99),
+    new Color(178,171,210),
+    new Color(94,60,153)
   )
 
   def main(args: Array[String]): Unit = {
