@@ -19,10 +19,14 @@ import org.supercsv.cellprocessor.constraint.NotNull
 import org.supercsv.cellprocessor.ift.CellProcessor
 import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
-import pt.tecnico.spark.util.StageRuntimeStatistic
+import pt.tecnico.spark.util.{AppData, StageData, StageRuntimeStatistic}
 
 import scala.collection.mutable.ArrayBuffer
+import scala.io.Source
+import org.json4s._
+import org.json4s.native.JsonMethods._
 
+import scala.collection.mutable
 
 /**
   * Created by dikei on 3/15/16.
@@ -58,6 +62,11 @@ object StageRuntimeAnalyzer {
     new Color(94,60,153)
   )
 
+  val rrdParser = new RRDp(".", null)
+  val cpuPattern = Pattern.compile("cpu\\/percent-idle.rrd")
+  val networkPattern = Pattern.compile("interface-eth0\\/if_octets.rrd")
+  val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time.rrd")
+
   def main(args: Array[String]): Unit = {
     if (args.length < 3) {
       println("Usage: ")
@@ -68,126 +77,8 @@ object StageRuntimeAnalyzer {
     val statsDir = args(0)
     val rrdFile = args(1)
     val outFile = args(2)
-    val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.csv$"))
-    val rrdParser = new RRDp(".", null)
-    val cpuPattern = Pattern.compile("cpu\\/percent-idle.rrd")
-    val networkPattern = Pattern.compile("interface-eth0\\/if_octets.rrd")
-    val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time.rrd")
-    val filesData = files.map { f =>
-      val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
-      try {
-        val headers = reader.getHeader(true)
-        Iterator.continually[StageRuntimeStatistic](reader.read(classOf[StageRuntimeStatistic], headers, processors:_*))
-          .takeWhile(_ != null).toArray[StageRuntimeStatistic]
-      } finally {
-        reader.close()
-      }
-    }
-    val totalRuntimes = filesData.map { run =>
-      val startTime = run.map(_.getCompletionTime).min
-      val endTime = run.map(_.getCompletionTime).max
-      endTime - startTime
-    }
-    val averageRuntime = totalRuntimes.sum / totalRuntimes.length
-    println(s"Average runtime: $averageRuntime")
 
-    val average = filesData.flatMap(run => run).groupBy(_.getStageId)
-    .map { case (stageId, runs) =>
-      val validRuns = runs.map { case (s: StageRuntimeStatistic) =>
-        val loadPattern = Pattern.compile("load\\/load.rrd")
-        val startDir = new File(rrdFile)
-        s.setCpuUsage(
-          100 - computeClusterAverage(
-            rrdParser,
-            cpuPattern,
-            startDir,
-            s.getStartTime,
-            s.getCompletionTime,
-            computeIdleCpuNodeAverage
-          )
-        )
-        s.setSystemLoad(
-          computeClusterAverage(
-            rrdParser,
-            loadPattern,
-            startDir,
-            s.getStartTime,
-            s.getCompletionTime,
-            computeLoadNodeAverage
-          )
-        )
-        s.setUpload(
-          computeClusterAverage(
-            rrdParser,
-            networkPattern,
-            startDir,
-            s.getStartTime,
-            s.getCompletionTime,
-            computeUploadNodeAverage
-          )
-        )
-        s.setDownload(
-          computeClusterAverage(
-            rrdParser,
-            networkPattern,
-            startDir,
-            s.getStartTime,
-            s.getCompletionTime,
-            computeDownloadNodeAverage
-          )
-        )
-        s
-      }.filter { s =>
-        !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
-      }
-      val total = validRuns.reduce[StageRuntimeStatistic] { case (s1: StageRuntimeStatistic, s2: StageRuntimeStatistic) =>
-        new StageRuntimeStatistic(
-          stageId,
-          s1.getAverage + s2.getAverage,
-          s1.getFastest + s2.getFastest,
-          s1.getSlowest + s2.getSlowest,
-          s1.getStandardDeviation + s2.getStandardDeviation,
-          s1.getName,
-          s1.getTaskCount + s2.getTaskCount,
-          s1.getPercent5 + s2.getPercent5,
-          s1.getPercent25 + s2.getPercent25,
-          s1.getMedian + s2.getMedian,
-          s1.getPercent75 + s2.getPercent75,
-          s1.getPercent95 + s2.getPercent95,
-          s1.getTotalTaskRuntime + s2.getTotalTaskRuntime,
-          s1.getStageRuntime + s2.getStageRuntime,
-          s1.getFetchWaitTime + s2.getFetchWaitTime,
-          s1.getShuffleWriteTime + s2.getShuffleWriteTime,
-          s1.getCpuUsage + s2.getCpuUsage,
-          s1.getSystemLoad + s2.getSystemLoad,
-          s1.getUpload + s2.getUpload,
-          s1.getDownload + s2.getDownload
-        )
-      }
-      val count = validRuns.length
-      new StageRuntimeStatistic(
-        stageId,
-        total.getAverage / count,
-        total.getFastest / count,
-        total.getSlowest / count,
-        total.getStandardDeviation / count,
-        total.getName,
-        total.getTaskCount / count,
-        total.getPercent5 / count,
-        total.getPercent25 / count,
-        total.getMedian / count,
-        total.getPercent75 / count,
-        total.getPercent95 / count,
-        total.getTotalTaskRuntime / count / 1000,
-        total.getStageRuntime / count / 1000,
-        total.getFetchWaitTime / count,
-        total.getShuffleWriteTime / count,
-        total.getCpuUsage / count,
-        total.getSystemLoad / count,
-        total.getUpload / count,
-        total.getDownload / count
-      )
-    }.toArray.sortBy(_.getStageId)
+    val (averageRuntime: Long, average: Array[StageRuntimeStatistic]) = processCsvInput(statsDir, rrdFile)
 
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
@@ -218,42 +109,190 @@ object StageRuntimeAnalyzer {
     } finally {
       writer.close()
     }
+  }
+
+  def processJsonInput(statsDir: String, rrdFile: String): (Long, Array[StageRuntimeStatistic]) = {
+    implicit val formats = DefaultFormats
+
+    val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.json$"))
+    val filesData = files.flatMap { f =>
+      val source = Source.fromFile(f)
+      try {
+        val fileIter = source.getLines()
+        val appData = parse(fileIter.next()).extract[AppData]
+        val stageCount = fileIter.next().toInt
+        val stages = mutable.Buffer[StageData]()
+        var i = 0
+        var failureDetected = false
+        while (i < stageCount) {
+          val stage = parse(fileIter.next()).extract[StageData]
+          if (stage.failed) {
+            failureDetected = false
+            i = stageCount
+          } else {
+            stages += stage
+          }
+          i += 1
+        }
+        // Skip over file that contained failed run
+        if (!failureDetected) {
+          Seq((appData, stages))
+        } else {
+          Seq()
+        }
+      } finally {
+        source.close()
+      }
+    }
+
+    val appRuntimes = filesData.map { case (appData, _) =>
+      appData.runtime
+    }
+
+    val averageRuntime = appRuntimes.sum / appRuntimes.length
+    println(s"Average runtime: $averageRuntime")
+
+    val average = filesData.flatMap(run => run._2).groupBy(_.stageId)
+      .map { case (stageId, runs) =>
+        val validRuns = runs.map { case (stageData: StageData) =>
+          val loadPattern = Pattern.compile("load\\/load.rrd")
+          val startDir = new File(rrdFile)
+          val cpuUsage = 100 - computeClusterAverage(
+            rrdParser,
+            cpuPattern,
+            startDir,
+            stageData.startTime,
+            stageData.completionTime,
+            computeIdleCpuNodeAverage
+          )
+          val systemLoad = computeClusterAverage(
+            rrdParser,
+            loadPattern,
+            startDir,
+            stageData.startTime,
+            stageData.completionTime,
+            computeLoadNodeAverage
+          )
+          val upload = computeClusterAverage(
+            rrdParser,
+            networkPattern,
+            startDir,
+            stageData.startTime,
+            stageData.completionTime,
+            computeUploadNodeAverage
+          )
+          val download = computeClusterAverage(
+            rrdParser,
+            networkPattern,
+            startDir,
+            stageData.startTime,
+            stageData.completionTime,
+            computeDownloadNodeAverage
+          )
+
+          new StageRuntimeStatistic(
+            stageId,
+            stageData.average,
+            stageData.fastest,
+            stageData.slowest,
+            stageData.standardDeviation,
+            stageData.name,
+            stageData.taskCount,
+            stageData.percent5,
+            stageData.percent25,
+            stageData.median,
+            stageData.percent75,
+            stageData.percent95,
+            stageData.totalTaskRuntime,
+            stageData.runtime,
+            stageData.fetchWaitTime,
+            stageData.shuffleWriteTime,
+            cpuUsage,
+            systemLoad,
+            upload,
+            download
+          )
+        }.filter { s =>
+          !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
+        }
+
+        val total = validRuns.reduce[StageRuntimeStatistic] { case (s1: StageRuntimeStatistic, s2: StageRuntimeStatistic) =>
+          new StageRuntimeStatistic(
+            stageId,
+            s1.getAverage + s2.getAverage,
+            s1.getFastest + s2.getFastest,
+            s1.getSlowest + s2.getSlowest,
+            s1.getStandardDeviation + s2.getStandardDeviation,
+            s1.getName,
+            s1.getTaskCount + s2.getTaskCount,
+            s1.getPercent5 + s2.getPercent5,
+            s1.getPercent25 + s2.getPercent25,
+            s1.getMedian + s2.getMedian,
+            s1.getPercent75 + s2.getPercent75,
+            s1.getPercent95 + s2.getPercent95,
+            s1.getTotalTaskRuntime + s2.getTotalTaskRuntime,
+            s1.getStageRuntime + s2.getStageRuntime,
+            s1.getFetchWaitTime + s2.getFetchWaitTime,
+            s1.getShuffleWriteTime + s2.getShuffleWriteTime,
+            s1.getCpuUsage + s2.getCpuUsage,
+            s1.getSystemLoad + s2.getSystemLoad,
+            s1.getUpload + s2.getUpload,
+            s1.getDownload + s2.getDownload
+          )
+        }
+        val count = validRuns.length
+        new StageRuntimeStatistic(
+          stageId,
+          total.getAverage / count,
+          total.getFastest / count,
+          total.getSlowest / count,
+          total.getStandardDeviation / count,
+          total.getName,
+          total.getTaskCount / count,
+          total.getPercent5 / count,
+          total.getPercent25 / count,
+          total.getMedian / count,
+          total.getPercent75 / count,
+          total.getPercent95 / count,
+          total.getTotalTaskRuntime / count / 1000,
+          total.getStageRuntime / count / 1000,
+          total.getFetchWaitTime / count,
+          total.getShuffleWriteTime / count,
+          total.getCpuUsage / count,
+          total.getSystemLoad / count,
+          total.getUpload / count,
+          total.getDownload / count
+        )
+      }.toArray.sortBy(_.getStageId)
 
     // Plot CPU graph
     println("Plotting CPU graph")
-    plotGraph(rrdFile, files, rrdParser, cpuPattern, plotCpuGraphPerRun, clusterAverage = true)
+    plotGraphJson(rrdFile, filesData, rrdParser, cpuPattern, plotCpuGraphPerRun, clusterAverage = true)
 
     // Plot network graph
     println("Plotting network graph")
-    plotGraph(rrdFile, files, rrdParser, networkPattern, plotNetworkGraphPerRun, clusterAverage = true)
+    plotGraphJson(rrdFile, filesData, rrdParser, networkPattern, plotNetworkGraphPerRun, clusterAverage = true)
 
     // Plot diskgraph
     println("Plotting disk IO graph")
-    plotGraph(rrdFile, files, rrdParser, diskPattern, plotDiskGraphPerRun, clusterAverage = true)
+    plotGraphJson(rrdFile, filesData, rrdParser, diskPattern, plotDiskGraphPerRun, clusterAverage = true)
+
+    (averageRuntime, average)
   }
 
-  def plotGraph(
-      rrdFile: String,
-      files: Array[File],
-      rrdParser: RRDp,
-      cpuPattern: Pattern,
-      plotFunc: (RRDp, Array[File], String, Long, Long, Array[(Integer, Long, Long)], Boolean) => Unit,
-      clusterAverage: Boolean = false): Unit = {
-    files.foreach { f =>
-      val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
-      val stages = try {
-        val headers = reader.getHeader(true)
-        Iterator.continually[StageRuntimeStatistic](reader.read(classOf[StageRuntimeStatistic], headers, processors: _*))
-          .takeWhile(_ != null).toArray[StageRuntimeStatistic]
-      } finally {
-        reader.close()
-      }
-
-      val start = stages.map(_.getStartTime).min
-      val end = stages.map(_.getCompletionTime).max
-      val stagesDuration = stages.map(s => (s.getStageId, s.getStartTime.toLong, s.getCompletionTime.toLong))
+  def plotGraphJson(
+    rrdFile: String,
+    runs: Seq[(AppData, mutable.Buffer[StageData])],
+    rrdParser: RRDp,
+    cpuPattern: Pattern,
+    plotFunc: (RRDp, Array[File], String, Long, Long, Seq[(Int, Long, Long)], Boolean) => Unit,
+    clusterAverage: Boolean = false): Unit = {
+    runs.foreach { case (appData, stages) =>
+      val start = appData.start
+      val end = appData.end
+      val stagesDuration = stages.map(s => (s.stageId, s.startTime, s.completionTime))
       val rrdFiles = findRrd(new File(rrdFile), cpuPattern)
-      plotFunc(rrdParser, rrdFiles, f.getAbsolutePath, start, end, stagesDuration, clusterAverage)
+      plotFunc(rrdParser, rrdFiles, s"${appData.id}-${appData.name}", start, end, stagesDuration, clusterAverage)
     }
   }
 
@@ -396,7 +435,7 @@ object StageRuntimeAnalyzer {
       outputPrefix: String,
       startTime: Long,
       endTime: Long,
-      stagesDuration: Array[(Integer, Long, Long)],
+      stagesDuration: Seq[(Int, Long, Long)],
       average: Boolean): Unit = {
 
     val points = files.flatMap { file =>
@@ -449,7 +488,7 @@ object StageRuntimeAnalyzer {
       outputPrefix: String,
       startTime: Long,
       endTime: Long,
-      stagesDuration: Array[(Integer, Long, Long)],
+      stagesDuration: Seq[(Int, Long, Long)],
       average: Boolean): Unit = {
     val points = files.flatMap { file =>
       val command = Array[String] (
@@ -519,7 +558,7 @@ object StageRuntimeAnalyzer {
       outputPrefix: String,
       startTime: Long,
       endTime: Long,
-      stagesDuration: Array[(Integer, Long, Long)],
+      stagesDuration: Seq[(Int, Long, Long)],
       average: Boolean) {
     val points = files.flatMap { file =>
       val command = Array[String] (
@@ -545,18 +584,18 @@ object StageRuntimeAnalyzer {
     val datasets = new ArrayBuffer[TimeSeriesCollection]()
     if (average) {
       val ioTimeSeries = new TimeSeries("Average IO Time")
-      val weightedIoTimeSeries = new TimeSeries("Average Weighted IO Write")
+//      val weightedIoTimeSeries = new TimeSeries("Average Weighted IO Write")
       points.foreach { case (time, machines) =>
           val totalIoTime = machines.map(_._2).sum
           val totalWeightedIoTime = machines.map(_._3).sum
           val averageIoTime = totalIoTime / machines.length
-          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
+//          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
           ioTimeSeries.add(new Second(new Date(time)), averageIoTime)
 //          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
       }
       val dataset = new TimeSeriesCollection
       dataset.addSeries(ioTimeSeries)
-      dataset.addSeries(weightedIoTimeSeries)
+//      dataset.addSeries(weightedIoTimeSeries)
       datasets += dataset
     }
     val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
@@ -578,7 +617,7 @@ object StageRuntimeAnalyzer {
 
   def drawChart(
       output: File,
-      stagesDuration: Array[(Integer, Long, Long)],
+      stagesDuration: Seq[(Int, Long, Long)],
       datasets: Array[TimeSeriesCollection],
       title: String,
       timeAxisLabel: String,
@@ -604,7 +643,10 @@ object StageRuntimeAnalyzer {
     val combinedPlot = new CombinedDomainXYPlot(timeAxis)
     combinedPlot.setOrientation(PlotOrientation.VERTICAL)
 
-    datasets.foreach { dataset =>
+    datasets.sortBy { tsc =>
+      tsc.getSeries(0).getKey.asInstanceOf[String]
+    }
+    .foreach { dataset =>
       val plot = new XYPlot(dataset, timeAxis, valueAxis, new StandardXYItemRenderer)
       stagesDuration.sortBy(_._2).zipWithIndex.foreach { case ((id, start, end), index) =>
         val intervalMarker = new IntervalMarker(start, end)
@@ -628,5 +670,157 @@ object StageRuntimeAnalyzer {
     //    chartFactory.draw(svg, new Rectangle(0, 0, width, height))
     //    SVGUtils.writeToSVG(lineChart, svg.getSVGElement())
 
+  }
+
+  @Deprecated
+  def processCsvInput(statsDir: String, rrdFile: String): (Long, Array[StageRuntimeStatistic]) = {
+    val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.csv$"))
+    val filesData = files.map { f =>
+      val reader = new CsvBeanReader(new FileReader(f), CsvPreference.STANDARD_PREFERENCE)
+      try {
+        val headers = reader.getHeader(true)
+        val stages = Iterator.continually[StageRuntimeStatistic](reader.read(classOf[StageRuntimeStatistic], headers, processors: _*))
+          .takeWhile(_ != null).toArray[StageRuntimeStatistic]
+        (f.getAbsolutePath, stages)
+      } finally {
+        reader.close()
+      }
+    }
+    val totalRuntimes = filesData.map { case (_, run) =>
+      val startTime = run.map(_.getCompletionTime).min
+      val endTime = run.map(_.getCompletionTime).max
+      endTime - startTime
+    }
+    val averageRuntime = totalRuntimes.sum / totalRuntimes.length
+    println(s"Average runtime: $averageRuntime")
+
+    val average = filesData.flatMap(run => run._2).groupBy(_.getStageId)
+      .map { case (stageId, runs) =>
+        val validRuns = runs.map { case (s: StageRuntimeStatistic) =>
+          val loadPattern = Pattern.compile("load\\/load.rrd")
+          val startDir = new File(rrdFile)
+          s.setCpuUsage(
+            100 - computeClusterAverage(
+              rrdParser,
+              cpuPattern,
+              startDir,
+              s.getStartTime,
+              s.getCompletionTime,
+              computeIdleCpuNodeAverage
+            )
+          )
+          s.setSystemLoad(
+            computeClusterAverage(
+              rrdParser,
+              loadPattern,
+              startDir,
+              s.getStartTime,
+              s.getCompletionTime,
+              computeLoadNodeAverage
+            )
+          )
+          s.setUpload(
+            computeClusterAverage(
+              rrdParser,
+              networkPattern,
+              startDir,
+              s.getStartTime,
+              s.getCompletionTime,
+              computeUploadNodeAverage
+            )
+          )
+          s.setDownload(
+            computeClusterAverage(
+              rrdParser,
+              networkPattern,
+              startDir,
+              s.getStartTime,
+              s.getCompletionTime,
+              computeDownloadNodeAverage
+            )
+          )
+          s
+        }.filter { s =>
+          !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
+        }
+        val total = validRuns.reduce[StageRuntimeStatistic] { case (s1: StageRuntimeStatistic, s2: StageRuntimeStatistic) =>
+          new StageRuntimeStatistic(
+            stageId,
+            s1.getAverage + s2.getAverage,
+            s1.getFastest + s2.getFastest,
+            s1.getSlowest + s2.getSlowest,
+            s1.getStandardDeviation + s2.getStandardDeviation,
+            s1.getName,
+            s1.getTaskCount + s2.getTaskCount,
+            s1.getPercent5 + s2.getPercent5,
+            s1.getPercent25 + s2.getPercent25,
+            s1.getMedian + s2.getMedian,
+            s1.getPercent75 + s2.getPercent75,
+            s1.getPercent95 + s2.getPercent95,
+            s1.getTotalTaskRuntime + s2.getTotalTaskRuntime,
+            s1.getStageRuntime + s2.getStageRuntime,
+            s1.getFetchWaitTime + s2.getFetchWaitTime,
+            s1.getShuffleWriteTime + s2.getShuffleWriteTime,
+            s1.getCpuUsage + s2.getCpuUsage,
+            s1.getSystemLoad + s2.getSystemLoad,
+            s1.getUpload + s2.getUpload,
+            s1.getDownload + s2.getDownload
+          )
+        }
+        val count = validRuns.length
+        new StageRuntimeStatistic(
+          stageId,
+          total.getAverage / count,
+          total.getFastest / count,
+          total.getSlowest / count,
+          total.getStandardDeviation / count,
+          total.getName,
+          total.getTaskCount / count,
+          total.getPercent5 / count,
+          total.getPercent25 / count,
+          total.getMedian / count,
+          total.getPercent75 / count,
+          total.getPercent95 / count,
+          total.getTotalTaskRuntime / count / 1000,
+          total.getStageRuntime / count / 1000,
+          total.getFetchWaitTime / count,
+          total.getShuffleWriteTime / count,
+          total.getCpuUsage / count,
+          total.getSystemLoad / count,
+          total.getUpload / count,
+          total.getDownload / count
+        )
+      }.toArray.sortBy(_.getStageId)
+
+    // Plot CPU graph
+    println("Plotting CPU graph")
+    plotGraphCsv(rrdFile, filesData, rrdParser, cpuPattern, plotCpuGraphPerRun, clusterAverage = true)
+
+    // Plot network graph
+    println("Plotting network graph")
+    plotGraphCsv(rrdFile, filesData, rrdParser, networkPattern, plotNetworkGraphPerRun, clusterAverage = true)
+
+    // Plot diskgraph
+    println("Plotting disk IO graph")
+    plotGraphCsv(rrdFile, filesData, rrdParser, diskPattern, plotDiskGraphPerRun, clusterAverage = true)
+
+    (averageRuntime, average)
+  }
+
+  @Deprecated
+  def plotGraphCsv(
+      rrdFile: String,
+      runs: Seq[(String, Array[StageRuntimeStatistic])],
+      rrdParser: RRDp,
+      cpuPattern: Pattern,
+      plotFunc: (RRDp, Array[File], String, Long, Long, Seq[(Int, Long, Long)], Boolean) => Unit,
+      clusterAverage: Boolean = false): Unit = {
+    runs.foreach { case (outputPrefix, stages) =>
+      val start = stages.map(_.getStartTime).min
+      val end = stages.map(_.getCompletionTime).max
+      val stagesDuration = stages.map(s => (s.getStageId.toInt, s.getStartTime.toLong, s.getCompletionTime.toLong))
+      val rrdFiles = findRrd(new File(rrdFile), cpuPattern)
+      plotFunc(rrdParser, rrdFiles, outputPrefix, start, end, stagesDuration, clusterAverage)
+    }
   }
 }
