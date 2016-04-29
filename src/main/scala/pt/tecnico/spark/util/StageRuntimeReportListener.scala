@@ -1,6 +1,6 @@
 package pt.tecnico.spark.util
 
-import java.io.{File, FileWriter}
+import java.io.{File, FileWriter, PrintWriter}
 import java.text.SimpleDateFormat
 import java.util.Calendar
 
@@ -12,6 +12,10 @@ import org.supercsv.io.{CsvBeanWriter, ICsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
 
 import scala.collection.mutable
+import org.json4s._
+import org.json4s.native.Serialization
+import org.json4s.native.Serialization.write
+
 
 /**
   * Listener to calculate the stage runtime
@@ -21,32 +25,61 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
   private var freeCores = 0
   private var totalCores = 0
 
-  private val timers = mutable.HashMap[Int, Timer]()
-  private val taskInfoMetrics = mutable.HashMap[Int, mutable.Buffer[(TaskInfo, TaskMetrics)]]()
+  private val timers = mutable.HashMap[(Int, Int), Timer]()
   private val executors = mutable.HashMap[String, ExecutorInfo]()
-  private val now = Calendar.getInstance()
-  private val dateFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss")
-  private val timeStamp = dateFormat.format(now.getTime)
-  private val appName = SparkEnv.get.conf.get("spark.app.name")
-  private val fileName = s"$appName-$timeStamp.csv"
+  private val appData = new AppData()
+  private val stagesData = new mutable.HashMap[(Int, Int), StageData]()
+  private val taskInfoMetrics = mutable.HashMap[(Int, Int), mutable.Buffer[(TaskInfo, TaskMetrics)]]()
 
-  private val headers = Array (
-    "StageId", "Name", "TaskCount", "TotalTaskRuntime", "StageRuntime", "FetchWaitTime", "ShuffleWriteTime",
-    "PartialOutputWaitTime", "Average", "Fastest", "Slowest", "StandardDeviation",
-    "Percent5", "Percent25", "Median", "Percent75", "Percent95",
-    "StartTime", "CompletionTime"
-  )
+  /**
+    * Call when application start
+    */
+  override def onApplicationStart(applicationStart: SparkListenerApplicationStart): Unit = {
+    appData.start = applicationStart.time
+    appData.name = applicationStart.appName
+    appData.id = applicationStart.appId.getOrElse("Nil")
+    appData.attempId = applicationStart.appAttemptId.getOrElse("Nil")
+  }
 
-  private val csvWriter = new CsvBeanWriter(new FileWriter(new File(statisticDir, fileName)), CsvPreference.STANDARD_PREFERENCE)
-  csvWriter.writeHeader(headers:_*)
+  /**
+    * Called when the application ends
+    */
+  override def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd): Unit = {
+    val jsonFile = s"${appData.id}-${appData.name}.json"
+    val writer = new PrintWriter(new FileWriter(new File(statisticDir, jsonFile)))
+
+    appData.end = applicationEnd.time
+    implicit val formats = Serialization.formats(NoTypeHints)
+    try {
+      // Write application data
+      write(appData, writer)
+      writer.println()
+      // Write the number of stages so we can read it
+      writer.println(stagesData.size)
+      // Write stages data separately
+      for(data <- stagesData.values) {
+        write(data, writer)
+        writer.println()
+      }
+    } finally {
+      writer.close()
+    }
+  }
 
   /**
     * Called when a stage is submitted
     */
   override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+    val info = stageSubmitted.stageInfo
+    val stage = new StageData()
+    stage.stageId = info.stageId
+    stage.stageAttemptId = info.attemptId
+
+    stagesData += (info.stageId, info.attemptId) -> stage
+    taskInfoMetrics += (info.stageId, info.attemptId) -> mutable.Buffer[(TaskInfo, TaskMetrics)]()
+
     val timer = new Timer
-    taskInfoMetrics += stageSubmitted.stageInfo.stageId -> mutable.Buffer[(TaskInfo, TaskMetrics)]()
-    timers += stageSubmitted.stageInfo.stageId -> timer
+    timers += (info.stageId, info.attemptId) -> timer
     timer.start()
   }
 
@@ -55,116 +88,96 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     */
   override def onStageCompleted(stageCompleted: SparkListenerStageCompleted): Unit = {
     val info = stageCompleted.stageInfo
+    val stageData = stagesData((info.stageId, info.attemptId))
 
     if (info.failureReason.isDefined) {
-      // Skip on failure
+      // Don't need to calculate anything on failure,
+      // we only use this to skip failed run
+      stageData.failed = true
       return
     }
 
-    val runtime = info.completionTime.get - info.submissionTime.get
+    stageData.taskCount = info.numTasks
+    stageData.name = info.name
+    stageData.startTime = info.submissionTime.get
+    stageData.completionTime = info.completionTime.get
 
-    val stageTaskInfoMetrics = taskInfoMetrics.get(info.stageId).get.toArray
-    val durations = stageTaskInfoMetrics.map { case (taskInfo, taskMetric) =>
-      taskInfo.duration
-    }
+    val stageTaskInfoMetrics = taskInfoMetrics.get((info.stageId, info.attemptId)).get
 
-    var fetchWaitTime: Long = 0
-    var shuffleWriteTime: Long = 0
-    var waitForPartialOutputTime: Long = 0
+    // Calculate total fetch-wait time, partial-output-wait time and shuffle-write time
     stageTaskInfoMetrics.foreach { case (taskInfo, taskMetric) =>
       taskMetric.shuffleReadMetrics match {
         case Some(metric) =>
-          fetchWaitTime += metric.fetchWaitTime
-          waitForPartialOutputTime += metric.waitForPartialOutputTime
+          stageData.fetchWaitTime += metric.fetchWaitTime
+          stageData.partialOutputWaitTime += metric.waitForPartialOutputTime
         case _ =>
       }
       taskMetric.shuffleWriteMetrics match {
         case Some(metric) =>
-          shuffleWriteTime += metric.shuffleWriteTime
+          stageData.shuffleWriteTime += metric.shuffleWriteTime
         case _ =>
       }
     }
 
-    var totalDuration = 0L
-    var min = Long.MaxValue
-    var max = 0L
+    val durations = stageTaskInfoMetrics.map { case (taskInfo, taskMetric) =>
+      taskInfo.duration
+    }
+
     durations.foreach { duration =>
-      totalDuration += duration
-      if (duration < min) {
-        min = duration
+      stageData.totalTaskRuntime += duration
+      if (duration < stageData.fastest) {
+        stageData.fastest = duration
       }
-      if (duration > max) {
-        max = duration
+      if (duration > stageData.slowest) {
+        stageData.slowest = duration
       }
     }
 
-    val mean = totalDuration / info.numTasks
+    stageData.average = stageData.totalTaskRuntime / info.numTasks
     val variance = durations.map { duration =>
-      val tmp = duration - mean
+      val tmp = duration - stageData.average
       tmp * tmp
     }.sum / info.numTasks
+    stageData.standardDeviation = Math.sqrt(variance).round
 
     val sortedDurations = durations.sorted
-    val percent5 = sortedDurations((sortedDurations.length * 0.05).toInt)
-    val percent25 = sortedDurations((sortedDurations.length * 0.25).toInt)
-    val median = sortedDurations((sortedDurations.length * 0.5).toInt)
-    val percent75 = sortedDurations((sortedDurations.length * 0.75).toInt)
-    val percent95 = sortedDurations((sortedDurations.length * 0.95).toInt)
+    stageData.percent5 = sortedDurations((sortedDurations.length * 0.05).toInt)
+    stageData.percent25 = sortedDurations((sortedDurations.length * 0.25).toInt)
+    stageData.median = sortedDurations((sortedDurations.length * 0.5).toInt)
+    stageData.percent75 = sortedDurations((sortedDurations.length * 0.75).toInt)
+    stageData.percent95 = sortedDurations((sortedDurations.length * 0.95).toInt)
 
-    log.info("Stage completed: {}", info)
-    log.info("Number of tasks: {}", info.numTasks)
-    log.info("Stage runtime: {} ms", runtime)
-    log.info("Stage submission time: {}", info.submissionTime.get)
-    log.info("Stage completion time: {}", info.completionTime.get)
-    log.info("Total task time: {} ms", totalDuration)
-    log.info("Fetch wait time: {} ms", fetchWaitTime)
-    log.info("Shuffle write time: {} ms", shuffleWriteTime)
-    log.info("Average task runtime: {} ms", mean)
-    log.info("Fastest task: {} ms", min)
-    log.info("Slowest task: {} ms", max)
-    log.info("Standard deviation: {} ms", Math.sqrt(variance))
-    log.info("5th percentile: {} ms", percent5)
-    log.info("25th percentile: {} ms", percent25)
-    log.info("Median: {} ms", median)
-    log.info("75th percentile: {} ms", percent75)
-    log.info("95th percentile: {} ms", percent95)
-    log.info("Time block for partial map output: {} ms", waitForPartialOutputTime)
+    log.info("Stage completed: {}", stageData.name)
+    log.info("Number of tasks: {}", stageData.taskCount)
+    log.info("Stage runtime: {} ms", stageData.runtime)
+    log.info("Stage submission time: {}", stageData.startTime)
+    log.info("Stage completion time: {}", stageData.completionTime)
+    log.info("Total task time: {} ms", stageData.totalTaskRuntime)
+    log.info("Fetch wait time: {} ms", stageData.fetchWaitTime)
+    log.info("Shuffle write time: {} ms", stageData.shuffleWriteTime)
+    log.info("Average task runtime: {} ms", stageData.average)
+    log.info("Fastest task: {} ms", stageData.fastest)
+    log.info("Slowest task: {} ms", stageData.slowest)
+    log.info("Standard deviation: {} ms", stageData.standardDeviation)
+    log.info("5th percentile: {} ms", stageData.percent5)
+    log.info("25th percentile: {} ms", stageData.percent25)
+    log.info("Median: {} ms", stageData.median)
+    log.info("75th percentile: {} ms", stageData.percent75)
+    log.info("95th percentile: {} ms", stageData.percent95)
+    log.info("Time block for partial map output: {} ms", stageData.partialOutputWaitTime)
 
-    val taskRuntimeStats = new StageRuntimeStatistic
-    taskRuntimeStats.setStartTime(info.submissionTime.get)
-    taskRuntimeStats.setCompletionTime(info.completionTime.get)
-    taskRuntimeStats.setName(info.name)
-    taskRuntimeStats.setStageId(info.stageId)
-    taskRuntimeStats.setTaskCount(info.numTasks)
-    taskRuntimeStats.setAverage(mean)
-    taskRuntimeStats.setFastest(min)
-    taskRuntimeStats.setSlowest(max)
-    taskRuntimeStats.setStandardDeviation(math.sqrt(variance).toLong)
-    taskRuntimeStats.setPercent25(percent25)
-    taskRuntimeStats.setPercent75(percent75)
-    taskRuntimeStats.setMedian(median)
-    taskRuntimeStats.setPercent5(percent5)
-    taskRuntimeStats.setPercent95(percent95)
-    taskRuntimeStats.setTotalTaskRuntime(totalDuration)
-    taskRuntimeStats.setStageRuntime(runtime)
-    taskRuntimeStats.setFetchWaitTime(fetchWaitTime)
-    taskRuntimeStats.setShuffleWriteTime(shuffleWriteTime)
-    taskRuntimeStats.setPartialOutputWaitTime(waitForPartialOutputTime)
-    csvWriter.write(taskRuntimeStats, headers:_*)
-    csvWriter.flush()
-
-    val cpuIdle = timers(info.stageId).elapsed
+    val cpuIdle = timers((info.stageId, info.attemptId)).elapsed
     log.info("Executor idle time: {}", cpuIdle)
 
     // Clear out the buffer to save memory
-    taskInfoMetrics.remove(info.stageId)
-    timers(info.stageId).reset()
+    taskInfoMetrics.remove((info.stageId, info.attemptId))
+    timers((info.stageId, info.attemptId)).reset()
   }
 
   override def onTaskStart(taskStart: SparkListenerTaskStart): Unit = {
     freeCores -= 1
     if (freeCores < 1) {
-      timers(taskStart.stageId).pause()
+      timers((taskStart.stageId, taskStart.stageAttemptId)).pause()
     }
   }
 
@@ -173,8 +186,8 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     */
   override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = {
     freeCores += 1
-    timers(taskEnd.stageId).start()
-    for (buffer <- taskInfoMetrics.get(taskEnd.stageId)) {
+    timers((taskEnd.stageId, taskEnd.stageAttemptId)).start()
+    for (buffer <- taskInfoMetrics.get((taskEnd.stageId, taskEnd.stageAttemptId))) {
       if (taskEnd.taskInfo != null && taskEnd.taskMetrics != null) {
         buffer += ((taskEnd.taskInfo, taskEnd.taskMetrics))
       }
@@ -187,19 +200,12 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     executors += executorAdded.executorId -> executorAdded.executorInfo
   }
 
-
   override def onExecutorRemoved(executorRemoved: SparkListenerExecutorRemoved): Unit = {
     val removedExecutor = executors(executorRemoved.executorId)
     totalCores -= removedExecutor.totalCores
     executors -= executorRemoved.executorId
   }
 
-  /**
-    * Called when the application ends
-    */
-  override def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd): Unit = {
-    csvWriter.close()
-  }
 }
 
 class Timer {
