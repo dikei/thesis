@@ -30,6 +30,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
   private val appData = new AppData()
   private val stagesData = new mutable.HashMap[(Int, Int), StageData]()
   private val taskInfoMetrics = mutable.HashMap[(Int, Int), mutable.Buffer[(TaskInfo, TaskMetrics)]]()
+  private val removeStageBarrier = SparkEnv.get.conf.getBoolean("spark.scheduler.removeStageBarrier", false)
 
   /**
     * Call when application start
@@ -37,6 +38,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
   override def onApplicationStart(applicationStart: SparkListenerApplicationStart): Unit = {
     appData.start = applicationStart.time
     appData.name = applicationStart.appName
+    appData.barrier = !removeStageBarrier
     appData.id = applicationStart.appId.getOrElse("Nil")
     appData.attempId = applicationStart.appAttemptId.getOrElse("Nil")
   }
@@ -45,7 +47,11 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     * Called when the application ends
     */
   override def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd): Unit = {
-    val jsonFile = s"${appData.id}-${appData.name}.json"
+    val jsonFile = if (removeStageBarrier) {
+      s"${appData.id}-${appData.name}-no-barrier.json"
+    } else {
+      s"${appData.id}-${appData.name}.json"
+    }
     val writer = new PrintWriter(new FileWriter(new File(statisticDir, jsonFile)))
 
     appData.end = applicationEnd.time

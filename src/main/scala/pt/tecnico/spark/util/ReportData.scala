@@ -8,7 +8,8 @@ case class AppData(
     var id: String = "",
     var attempId: String = "",
     var start: Long = 0,
-    var end: Long = 0) {
+    var end: Long = 0,
+    var barrier: Boolean = true) {
   def runtime = end - start
 }
 
