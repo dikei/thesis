@@ -16,7 +16,7 @@ object TriangleCount {
     val noPartitions = if (args.length > 2) args(2).toInt else -1
     val statsDir = if (args.length > 3) args(3) else "stats"
 
-    val conf = new SparkConf().setAppName("TriangleCount With Barrier")
+    val conf = new SparkConf().setAppName("TriangleCount")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
 //    conf.set("spark.scheduler.removeStageBarrier", "true")
 
