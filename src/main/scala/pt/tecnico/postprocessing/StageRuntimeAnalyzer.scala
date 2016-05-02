@@ -481,19 +481,16 @@ object StageRuntimeAnalyzer {
     .groupBy(t => t._1)
 
     val datasets = new ArrayBuffer[TimeSeriesCollection]()
-    if (average) {
-      val series = new TimeSeries("Average Cluster")
-      points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
-        val totalCpu = machines.map(_._2).sum
-        val averageCpu = totalCpu / machines.length
-        series.add(new Second(new Date(time)), averageCpu)
-      }
-      datasets += new TimeSeriesCollection(series)
-    }
     val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
     points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
+      var cpuTotal = 0.0
       machines.foreach { case (_, cpu, machine) =>
+        cpuTotal += cpu
         seriesMap.getOrElseUpdate(machine, new TimeSeries(machine)).add(new Second(new Date(time)), cpu)
+      }
+      if (average) {
+        seriesMap.getOrElseUpdate("Average CPU", new TimeSeries("Average CPU"))
+          .add(new Second(new Date(time)), cpuTotal / machines.length)
       }
     }
     seriesMap.foreach { case (_, series) =>
@@ -534,26 +531,13 @@ object StageRuntimeAnalyzer {
     .groupBy(t => t._1)
 
     val datasets = new ArrayBuffer[TimeSeriesCollection]()
-    if (average) {
-      val downloadSeries = new TimeSeries("Download")
-      val uploadSeries = new TimeSeries("Upload")
-      points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
-        val totalUpload = machines.map(_._2)
-        val totalDownload = machines.map(_._3)
-        val averageUpload = totalUpload.sum / totalUpload.length
-        val averageDownload = totalDownload.sum / totalDownload.length
-        downloadSeries.add(new Second(new Date(time)), averageDownload)
-        uploadSeries.add(new Second(new Date(time)), averageUpload)
-      }
-      val dataset = new TimeSeriesCollection
-      dataset.addSeries(uploadSeries)
-      dataset.addSeries(downloadSeries)
-      datasets += dataset
-    }
-
     val seriesMap = new scala.collection.mutable.HashMap[String, (TimeSeries, TimeSeries)]
     points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
+      var downloadTotal = 0.0
+      var uploadTotal = 0.0
       machines.foreach { case (_, upload, download, machine) =>
+        uploadTotal += upload
+        downloadTotal += download
         val uploadDownload =
           seriesMap.getOrElseUpdate(
             s"$machine",
@@ -561,6 +545,15 @@ object StageRuntimeAnalyzer {
           )
         uploadDownload._1.add(new Second(new Date(time)), upload)
         uploadDownload._2.add(new Second(new Date(time)), download)
+      }
+      if (average) {
+        val uploadDownload =
+          seriesMap.getOrElseUpdate(
+            "Average download",
+            (new TimeSeries("Average upload"), new TimeSeries("Average download"))
+          )
+        uploadDownload._1.add(new Second(new Date(time)), uploadTotal / machines.length)
+        uploadDownload._2.add(new Second(new Date(time)), downloadTotal / machines.length)
       }
     }
     seriesMap.foreach { case (_, (uploadSeries, downloadSeries)) =>
@@ -607,22 +600,22 @@ object StageRuntimeAnalyzer {
     val seriesMap = new scala.collection.mutable.HashMap[(String, String), TimeSeries]
 
     points.foreach { case (time, machineDisks) =>
-      if (average) {
-        machineDisks.groupBy(_._5).foreach { case (disk, machines) =>
-          val totalIoTime = machines.map(_._2).sum
-          val averageIoTime = totalIoTime / machines.length
-          seriesMap.getOrElseUpdate(("Average", disk), new TimeSeries("Average IO Time"))
-            .add(new Second(new Date(time)), averageIoTime)
-          //          val totalWeightedIoTime = machines.map(_._3).sum
-          //          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
-          //          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
-        }
-      }
+      val ioTimeTotal = new mutable.HashMap[String, Double]()
       machineDisks.foreach { case (_, ioTime, weightedIoTime, machine, disk) =>
+        ioTimeTotal += disk -> (ioTime + ioTimeTotal.getOrElse(disk, 0.0))
         seriesMap.getOrElseUpdate((machine, disk), new TimeSeries(s"$machine-$disk-IoTime"))
           .add(new Second(new Date(time)), ioTime)
 //          seriesMap.getOrElseUpdate(s"$machine-WeightedIoTime", new TimeSeries(s"$machine-WeightedIoTime"))
 //            .add(new Second(new Date(time)), weightedIoTime)
+      }
+      if (average) {
+        machineDisks.groupBy(_._5).foreach { case (disk, machines) =>
+          seriesMap.getOrElseUpdate(("Average", disk), new TimeSeries(s"Average IO Time - $disk"))
+            .add(new Second(new Date(time)), ioTimeTotal(disk) / machines.length)
+          //          val totalWeightedIoTime = machines.map(_._3).sum
+          //          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
+          //          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
+        }
       }
     }
 
