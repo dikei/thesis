@@ -11,9 +11,11 @@ import org.jfree.chart.axis._
 import org.jfree.chart.plot._
 import org.jfree.chart.renderer.xy.StandardXYItemRenderer
 import org.jfree.chart.util.RelativeDateFormat
-import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart}
+import org.jfree.chart.{ChartUtilities, JFreeChart}
 import org.jfree.data.time.{Second, TimeSeries, TimeSeriesCollection}
 import org.jfree.ui.RectangleInsets
+import org.json4s._
+import org.json4s.native.JsonMethods._
 import org.supercsv.cellprocessor._
 import org.supercsv.cellprocessor.constraint.NotNull
 import org.supercsv.cellprocessor.ift.CellProcessor
@@ -21,12 +23,9 @@ import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
 import pt.tecnico.spark.util.{AppData, StageData, StageRuntimeStatistic}
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.io.Source
-import org.json4s._
-import org.json4s.native.JsonMethods._
-
-import scala.collection.mutable
 
 /**
   * Created by dikei on 3/15/16.
@@ -63,9 +62,12 @@ object StageRuntimeAnalyzer {
   )
 
   val rrdParser = new RRDp(".", null)
-  val cpuPattern = Pattern.compile("cpu\\/percent-idle.rrd")
-  val networkPattern = Pattern.compile("interface-eth0\\/if_octets.rrd")
-  val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time.rrd")
+  val cpuPattern = Pattern.compile("cpu\\/percent-idle\\.rrd")
+  val networkPattern = Pattern.compile("interface-eth0\\/if_octets\\.rrd")
+  val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time\\.rrd|disk-vda\\/disk_io_time\\.rrd")
+  val loadPattern = Pattern.compile("load\\/load\\.rrd")
+  // Blacklist the master node from cluster averages
+  val blacklisted = Pattern.compile("testinstance-06-1\\.novalocal")
 
   def main(args: Array[String]): Unit = {
     if (args.length < 3) {
@@ -166,11 +168,11 @@ object StageRuntimeAnalyzer {
     val average = filesData.flatMap(run => run._2).groupBy(_.stageId)
       .map { case (stageId, runs) =>
         val validRuns = runs.map { case (stageData: StageData) =>
-          val loadPattern = Pattern.compile("load\\/load.rrd")
           val startDir = new File(rrdFile)
           val cpuUsage = 100 - computeClusterAverage(
             rrdParser,
             cpuPattern,
+            blacklisted,
             startDir,
             stageData.startTime,
             stageData.completionTime,
@@ -179,6 +181,7 @@ object StageRuntimeAnalyzer {
           val systemLoad = computeClusterAverage(
             rrdParser,
             loadPattern,
+            blacklisted,
             startDir,
             stageData.startTime,
             stageData.completionTime,
@@ -187,6 +190,7 @@ object StageRuntimeAnalyzer {
           val upload = computeClusterAverage(
             rrdParser,
             networkPattern,
+            blacklisted,
             startDir,
             stageData.startTime,
             stageData.completionTime,
@@ -195,6 +199,7 @@ object StageRuntimeAnalyzer {
           val download = computeClusterAverage(
             rrdParser,
             networkPattern,
+            blacklisted,
             startDir,
             stageData.startTime,
             stageData.completionTime,
@@ -278,31 +283,34 @@ object StageRuntimeAnalyzer {
 
     // Plot CPU graph
     println("Plotting CPU graph")
-    plotGraphJson(rrdFile, filesData, rrdParser, cpuPattern, plotCpuGraphPerRun, clusterAverage = true)
+    plotGraphJson(rrdFile, filesData, rrdParser, cpuPattern, blacklisted, plotCpuGraphPerRun, clusterAverage = true)
 
     // Plot network graph
     println("Plotting network graph")
-    plotGraphJson(rrdFile, filesData, rrdParser, networkPattern, plotNetworkGraphPerRun, clusterAverage = true)
+    plotGraphJson(rrdFile, filesData, rrdParser, networkPattern, blacklisted, plotNetworkGraphPerRun, clusterAverage = true)
 
     // Plot diskgraph
     println("Plotting disk IO graph")
-    plotGraphJson(rrdFile, filesData, rrdParser, diskPattern, plotDiskGraphPerRun, clusterAverage = true)
+    plotGraphJson(rrdFile, filesData, rrdParser, diskPattern, blacklisted, plotDiskGraphPerRun, clusterAverage = true)
 
     (averageRuntime, bestRuntime, worseRuntime, average)
   }
 
   def plotGraphJson(
-    rrdFile: String,
-    runs: Seq[(AppData, mutable.Buffer[StageData], String)],
-    rrdParser: RRDp,
-    cpuPattern: Pattern,
-    plotFunc: (RRDp, Array[File], String, Long, Long, Seq[(Int, Long, Long)], Boolean) => Unit,
-    clusterAverage: Boolean = false): Unit = {
+      rrdFile: String,
+      runs: Seq[(AppData, mutable.Buffer[StageData], String)],
+      rrdParser: RRDp,
+      matchPattern: Pattern,
+      blacklisted: Pattern,
+      plotFunc: (RRDp, Array[File], String, Long, Long, Seq[(Int, Long, Long)], Boolean) => Unit,
+      clusterAverage: Boolean = false): Unit = {
     runs.foreach { case (appData, stages, outputPrefix) =>
       val start = appData.start
       val end = appData.end
       val stagesDuration = stages.map(s => (s.stageId, s.startTime, s.completionTime))
-      val rrdFiles = findRrd(new File(rrdFile), cpuPattern)
+      val rrdFiles = findRrd(new File(rrdFile), matchPattern).filter { f =>
+        !blacklisted.matcher(f.getAbsolutePath).find()
+      }
       plotFunc(rrdParser, rrdFiles, outputPrefix, start, end, stagesDuration, clusterAverage)
     }
   }
@@ -319,14 +327,17 @@ object StageRuntimeAnalyzer {
 
   def computeClusterAverage(
       rrdParser: RRDp,
-      cpuPattern: Pattern,
+      matchPattern: Pattern,
+      blacklisted: Pattern,
       startDir: File,
       startTime: Long,
       endTime: Long,
       procFunc: (RRDp, String, Long, Long) => Double
       ): Double = {
-    val files = findRrd(startDir, cpuPattern)
-    val validResult = files.map { f =>
+    val files = findRrd(startDir, matchPattern)
+    val validResult = files.filter { f =>
+      !blacklisted.matcher(f.getAbsolutePath).find()
+    }.map { f =>
       procFunc(rrdParser, f.getPath, startTime, endTime)
     }.filter(!_.isNaN)
     val total = validResult.reduce[Double] { case (d1: Double, d2: Double) =>
@@ -587,39 +598,40 @@ object StageRuntimeAnalyzer {
           val ioTime = tokens(2).trim().toDouble
           val weightedIoTime = tokens(3).trim().toDouble
           val time = tokens(0).toLong
-          (time * 1000, ioTime, weightedIoTime, file.getParentFile.getParentFile.getName)
+          (time * 1000, ioTime, weightedIoTime, file.getParentFile.getParentFile.getName, file.getParentFile.getName)
         }
     }
     .groupBy(t => t._1)
 
     val datasets = new ArrayBuffer[TimeSeriesCollection]()
-    if (average) {
-      val ioTimeSeries = new TimeSeries("Average IO Time")
-//      val weightedIoTimeSeries = new TimeSeries("Average Weighted IO Write")
-      points.foreach { case (time, machines) =>
+    val seriesMap = new scala.collection.mutable.HashMap[(String, String), TimeSeries]
+
+    points.foreach { case (time, machineDisks) =>
+      if (average) {
+        machineDisks.groupBy(_._5).foreach { case (disk, machines) =>
           val totalIoTime = machines.map(_._2).sum
-          val totalWeightedIoTime = machines.map(_._3).sum
           val averageIoTime = totalIoTime / machines.length
-//          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
-          ioTimeSeries.add(new Second(new Date(time)), averageIoTime)
-//          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
+          seriesMap.getOrElseUpdate(("Average", disk), new TimeSeries("Average IO Time"))
+            .add(new Second(new Date(time)), averageIoTime)
+          //          val totalWeightedIoTime = machines.map(_._3).sum
+          //          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
+          //          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
+        }
       }
-      val dataset = new TimeSeriesCollection
-      dataset.addSeries(ioTimeSeries)
-//      dataset.addSeries(weightedIoTimeSeries)
-      datasets += dataset
-    }
-    val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
-    points.foreach { case (time, machines) =>
-      machines.foreach { case (_, ioTime, weightedIoTime, machine) =>
-        seriesMap.getOrElseUpdate(s"$machine-IoTime", new TimeSeries(s"$machine-IoTime"))
+      machineDisks.foreach { case (_, ioTime, weightedIoTime, machine, disk) =>
+        seriesMap.getOrElseUpdate((machine, disk), new TimeSeries(s"$machine-$disk-IoTime"))
           .add(new Second(new Date(time)), ioTime)
 //          seriesMap.getOrElseUpdate(s"$machine-WeightedIoTime", new TimeSeries(s"$machine-WeightedIoTime"))
 //            .add(new Second(new Date(time)), weightedIoTime)
       }
     }
-    seriesMap.foreach { case (_, series) =>
-      datasets += new TimeSeriesCollection(series)
+
+    seriesMap.groupBy(_._1._1).foreach { case (machine, map) =>
+      val dataset = new TimeSeriesCollection()
+      map.foreach { case ((_, disk), series) =>
+        dataset.addSeries(series)
+      }
+      datasets += dataset
     }
 
     val output = new File( s"$outputPrefix-disk.png" )
@@ -714,6 +726,7 @@ object StageRuntimeAnalyzer {
             100 - computeClusterAverage(
               rrdParser,
               cpuPattern,
+              blacklisted,
               startDir,
               s.getStartTime,
               s.getCompletionTime,
@@ -724,6 +737,7 @@ object StageRuntimeAnalyzer {
             computeClusterAverage(
               rrdParser,
               loadPattern,
+              blacklisted,
               startDir,
               s.getStartTime,
               s.getCompletionTime,
@@ -734,6 +748,7 @@ object StageRuntimeAnalyzer {
             computeClusterAverage(
               rrdParser,
               networkPattern,
+              blacklisted,
               startDir,
               s.getStartTime,
               s.getCompletionTime,
@@ -744,6 +759,7 @@ object StageRuntimeAnalyzer {
             computeClusterAverage(
               rrdParser,
               networkPattern,
+              blacklisted,
               startDir,
               s.getStartTime,
               s.getCompletionTime,
