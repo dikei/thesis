@@ -78,8 +78,8 @@ object StageRuntimeAnalyzer {
     val rrdFile = args(1)
     val outFile = args(2)
 
-    val (averageRuntime: Long, average: Array[StageRuntimeStatistic]) = processCsvInput(statsDir, rrdFile)
-
+//    val (averageRuntime: Long, average: Array[StageRuntimeStatistic]) = processCsvInput(statsDir, rrdFile)
+    val (averageRuntime, bestRuntime, worseRuntime, average) = processJsonInput(statsDir, rrdFile)
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
       "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime", "CpuUsage", "SystemLoad", "Upload", "Download"
@@ -104,14 +104,16 @@ object StageRuntimeAnalyzer {
         writer.write(stage, headers, writeProcessors)
       }
       writer.writeComment("#")
-      writer.writeComment(s"#Total runtime: $averageRuntime ms")
+      writer.writeComment(s"#Average runtime: $averageRuntime ms")
+      writer.writeComment(s"#Best runtime: $bestRuntime ms")
+      writer.writeComment(s"#Worse runtime: $worseRuntime ms")
       writer.writeComment("#")
     } finally {
       writer.close()
     }
   }
 
-  def processJsonInput(statsDir: String, rrdFile: String): (Long, Array[StageRuntimeStatistic]) = {
+  def processJsonInput(statsDir: String, rrdFile: String): (Long, Long, Long, Array[StageRuntimeStatistic]) = {
     implicit val formats = DefaultFormats
 
     val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.json$"))
@@ -136,21 +138,30 @@ object StageRuntimeAnalyzer {
         }
         // Skip over file that contained failed run
         if (!failureDetected) {
-          Seq((appData, stages))
+          Seq((appData, stages, f.getAbsolutePath))
         } else {
           Seq()
         }
-      } finally {
+      } catch {
+        case e: Exception =>
+          println(s"Invalid report: ${f.getAbsolutePath}")
+          Seq()
+      }
+      finally {
         source.close()
       }
     }
 
-    val appRuntimes = filesData.map { case (appData, _) =>
+    val appRuntimes = filesData.map { case (appData, _, _) =>
       appData.runtime
     }
 
     val averageRuntime = appRuntimes.sum / appRuntimes.length
+    val bestRuntime = appRuntimes.min
+    val worseRuntime = appRuntimes.max
     println(s"Average runtime: $averageRuntime")
+    println(s"Best runtime: $bestRuntime")
+    println(s"Worse runtime: $worseRuntime")
 
     val average = filesData.flatMap(run => run._2).groupBy(_.stageId)
       .map { case (stageId, runs) =>
@@ -277,22 +288,22 @@ object StageRuntimeAnalyzer {
     println("Plotting disk IO graph")
     plotGraphJson(rrdFile, filesData, rrdParser, diskPattern, plotDiskGraphPerRun, clusterAverage = true)
 
-    (averageRuntime, average)
+    (averageRuntime, bestRuntime, worseRuntime, average)
   }
 
   def plotGraphJson(
     rrdFile: String,
-    runs: Seq[(AppData, mutable.Buffer[StageData])],
+    runs: Seq[(AppData, mutable.Buffer[StageData], String)],
     rrdParser: RRDp,
     cpuPattern: Pattern,
     plotFunc: (RRDp, Array[File], String, Long, Long, Seq[(Int, Long, Long)], Boolean) => Unit,
     clusterAverage: Boolean = false): Unit = {
-    runs.foreach { case (appData, stages) =>
+    runs.foreach { case (appData, stages, outputPrefix) =>
       val start = appData.start
       val end = appData.end
       val stagesDuration = stages.map(s => (s.stageId, s.startTime, s.completionTime))
       val rrdFiles = findRrd(new File(rrdFile), cpuPattern)
-      plotFunc(rrdParser, rrdFiles, s"${appData.id}-${appData.name}", start, end, stagesDuration, clusterAverage)
+      plotFunc(rrdParser, rrdFiles, outputPrefix, start, end, stagesDuration, clusterAverage)
     }
   }
 
