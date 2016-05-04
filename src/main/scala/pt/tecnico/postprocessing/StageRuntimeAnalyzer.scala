@@ -462,13 +462,15 @@ object StageRuntimeAnalyzer {
 
   def plotStageGanttChart(runs: Seq[(AppData, mutable.Buffer[StageData], String)]): Unit = {
     runs.foreach { case (appData, stages, outputPrefix) =>
-      val taskSeries = new TaskSeries(appData.id)
-      stages.sortBy(_.stageId).foreach { stage =>
-        taskSeries.add(new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime)))
-      }
       val collection = new TaskSeriesCollection()
-      collection.add(taskSeries)
-
+      stages.groupBy(_.jobId).toList.sortBy(_._1)
+      .foreach { case (jobId, jobStages) =>
+        val taskSeries = new TaskSeries(s"$jobId")
+        jobStages.sortBy(_.startTime).foreach { stage =>
+          taskSeries.add(new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime)))
+        }
+        collection.add(taskSeries)
+      }
       val dateFormat = new RelativeDateFormat(appData.start)
       val timeAxis = new DateAxis("Time")
       timeAxis.setAutoRange(true)
