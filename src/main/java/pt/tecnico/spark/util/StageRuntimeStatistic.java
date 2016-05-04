@@ -50,7 +50,8 @@ public class StageRuntimeStatistic {
                                  Double cpuUsage,
                                  Double systemLoad,
                                  Double upload,
-                                 Double download) {
+                                 Double download,
+                                 Long partialOutputWaitTime) {
         this.stageId = stageId;
         this.average = average;
         this.fastest = fastest;
@@ -71,6 +72,7 @@ public class StageRuntimeStatistic {
         this.systemLoad = systemLoad;
         this.upload = upload;
         this.download = download;
+        this.partialOutputWaitTime = partialOutputWaitTime;
     }
 
     public Long getPartialOutputWaitTime() {

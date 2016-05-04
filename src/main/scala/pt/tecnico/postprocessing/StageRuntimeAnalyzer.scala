@@ -2,17 +2,22 @@ package pt.tecnico.postprocessing
 
 import java.awt.{Color, Font}
 import java.io.{File, FileReader, FileWriter}
+import java.text.DateFormat
 import java.util.Date
 import java.util.regex.Pattern
 
 import com.google.common.io.PatternFilenameFilter
 import net.stamfest.rrd._
 import org.jfree.chart.axis._
+import org.jfree.chart.labels.IntervalCategoryToolTipGenerator
 import org.jfree.chart.plot._
+import org.jfree.chart.renderer.category.{CategoryItemRenderer, GanttRenderer}
 import org.jfree.chart.renderer.xy.StandardXYItemRenderer
+import org.jfree.chart.urls.StandardCategoryURLGenerator
 import org.jfree.chart.util.RelativeDateFormat
-import org.jfree.chart.{ChartUtilities, JFreeChart}
-import org.jfree.data.time.{Second, TimeSeries, TimeSeriesCollection}
+import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart}
+import org.jfree.data.gantt.{Task, TaskSeries, TaskSeriesCollection}
+import org.jfree.data.time.{Second, SimpleTimePeriod, TimeSeries, TimeSeriesCollection}
 import org.jfree.ui.RectangleInsets
 import org.json4s._
 import org.json4s.native.JsonMethods._
@@ -84,7 +89,7 @@ object StageRuntimeAnalyzer {
     val (averageRuntime, bestRuntime, worseRuntime, average) = processJsonInput(statsDir, rrdFile)
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
-      "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime", "CpuUsage", "SystemLoad", "Upload", "Download"
+      "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime", "PartialOutputWaitTime", "FetchWaitTime"
     )
 
     val numberFormater = new FmtNumber(".##")
@@ -95,10 +100,8 @@ object StageRuntimeAnalyzer {
       new NotNull(),
       new NotNull(),
       new NotNull(),
-      numberFormater,
-      numberFormater,
-      networkFormatter,
-      networkFormatter
+      new NotNull(),
+      new NotNull()
     )
     try {
       writer.writeHeader(headers:_*)
@@ -226,7 +229,8 @@ object StageRuntimeAnalyzer {
             cpuUsage,
             systemLoad,
             upload,
-            download
+            download,
+            stageData.partialOutputWaitTime
           )
         }.filter { s =>
           !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
@@ -253,7 +257,8 @@ object StageRuntimeAnalyzer {
             s1.getCpuUsage + s2.getCpuUsage,
             s1.getSystemLoad + s2.getSystemLoad,
             s1.getUpload + s2.getUpload,
-            s1.getDownload + s2.getDownload
+            s1.getDownload + s2.getDownload,
+            s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime
           )
         }
         val count = validRuns.length
@@ -272,12 +277,13 @@ object StageRuntimeAnalyzer {
           total.getPercent95 / count,
           total.getTotalTaskRuntime / count / 1000,
           total.getStageRuntime / count / 1000,
-          total.getFetchWaitTime / count,
-          total.getShuffleWriteTime / count,
+          total.getFetchWaitTime / count / 1000,
+          total.getShuffleWriteTime / count / 1000,
           total.getCpuUsage / count,
           total.getSystemLoad / count,
           total.getUpload / count,
-          total.getDownload / count
+          total.getDownload / count,
+          total.getPartialOutputWaitTime / count / 1000
         )
       }.toArray.sortBy(_.getStageId)
 
@@ -784,7 +790,8 @@ object StageRuntimeAnalyzer {
             s1.getCpuUsage + s2.getCpuUsage,
             s1.getSystemLoad + s2.getSystemLoad,
             s1.getUpload + s2.getUpload,
-            s1.getDownload + s2.getDownload
+            s1.getDownload + s2.getDownload,
+            s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime
           )
         }
         val count = validRuns.length
@@ -803,12 +810,13 @@ object StageRuntimeAnalyzer {
           total.getPercent95 / count,
           total.getTotalTaskRuntime / count / 1000,
           total.getStageRuntime / count / 1000,
-          total.getFetchWaitTime / count,
-          total.getShuffleWriteTime / count,
+          total.getFetchWaitTime / count / 1000,
+          total.getShuffleWriteTime / count / 1000,
           total.getCpuUsage / count,
           total.getSystemLoad / count,
           total.getUpload / count,
-          total.getDownload / count
+          total.getDownload / count,
+          total.getPartialOutputWaitTime / count / 1000
         )
       }.toArray.sortBy(_.getStageId)
 
