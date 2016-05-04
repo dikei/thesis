@@ -299,6 +299,9 @@ object StageRuntimeAnalyzer {
     println("Plotting disk IO graph")
     plotGraphJson(rrdFile, filesData, rrdParser, diskPattern, blacklisted, plotDiskGraphPerRun, clusterAverage = true)
 
+    println("Plotting stage gantt chart")
+    plotStageGanttChart(filesData)
+
     (averageRuntime, bestRuntime, worseRuntime, average)
   }
 
@@ -454,6 +457,37 @@ object StageRuntimeAnalyzer {
       totalLines / lines.length
     } else {
       Double.NaN
+    }
+  }
+
+  def plotStageGanttChart(runs: Seq[(AppData, mutable.Buffer[StageData], String)]): Unit = {
+    runs.foreach { case (appData, stages, outputPrefix) =>
+      val taskSeries = new TaskSeries(appData.id)
+      stages.sortBy(_.stageId).foreach { stage =>
+        taskSeries.add(new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime)))
+      }
+      val collection = new TaskSeriesCollection()
+      collection.add(taskSeries)
+
+      val dateFormat = new RelativeDateFormat(appData.start)
+      val timeAxis = new DateAxis("Time")
+      timeAxis.setAutoRange(true)
+      timeAxis.setDateFormatOverride(dateFormat)
+      timeAxis.setMinimumDate(new Date(appData.start))
+      timeAxis.setMaximumDate(new Date(appData.end))
+      timeAxis.setLowerMargin(0.02)
+      timeAxis.setUpperMargin(0.02)
+
+      val categoryAxis: CategoryAxis = new CategoryAxis("Stages")
+
+      val renderer = new GanttRenderer
+      val plot = new CategoryPlot(collection, categoryAxis, timeAxis, renderer)
+      plot.setOrientation(PlotOrientation.HORIZONTAL)
+      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
+      val output = new File( s"$outputPrefix-stages.png" )
+      val width = 1280
+      val height = 960
+      ChartUtilities.saveChartAsPNG(output, chart, width, height)
     }
   }
 
