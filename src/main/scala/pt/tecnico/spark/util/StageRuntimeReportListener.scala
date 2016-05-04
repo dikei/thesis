@@ -1,20 +1,16 @@
 package pt.tecnico.spark.util
 
 import java.io.{File, FileWriter, PrintWriter}
-import java.text.SimpleDateFormat
-import java.util.Calendar
 
-import org.apache.spark.{Logging, SparkEnv}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.ExecutorInfo
-import org.supercsv.io.{CsvBeanWriter, ICsvBeanWriter}
-import org.supercsv.prefs.CsvPreference
-
-import scala.collection.mutable
+import org.apache.spark.{Logging, SparkEnv}
 import org.json4s._
 import org.json4s.native.Serialization
 import org.json4s.native.Serialization.write
+
+import scala.collection.mutable
 
 
 /**
@@ -31,6 +27,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
   private val stagesData = new mutable.HashMap[(Int, Int), StageData]()
   private val taskInfoMetrics = mutable.HashMap[(Int, Int), mutable.Buffer[(TaskInfo, TaskMetrics)]]()
   private val removeStageBarrier = SparkEnv.get.conf.getBoolean("spark.scheduler.removeStageBarrier", false)
+  private val stageIdToJobId = new mutable.HashMap[Int, Int]()
 
   /**
     * Call when application start
@@ -72,6 +69,12 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     }
   }
 
+  override def onJobStart(jobStart: SparkListenerJobStart): Unit = {
+    jobStart.stageIds.foreach { stageId =>
+      stageIdToJobId += stageId -> jobStart.jobId
+    }
+  }
+
   /**
     * Called when a stage is submitted
     */
@@ -107,6 +110,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     stageData.name = info.name
     stageData.startTime = info.submissionTime.get
     stageData.completionTime = info.completionTime.get
+    stageData.jobId = stageIdToJobId.getOrElse(info.stageId, -1)
 
     val stageTaskInfoMetrics = taskInfoMetrics.get((info.stageId, info.attemptId)).get
 
