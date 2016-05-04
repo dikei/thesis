@@ -110,12 +110,14 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
 
     val stageTaskInfoMetrics = taskInfoMetrics.get((info.stageId, info.attemptId)).get
 
-    // Calculate total fetch-wait time, partial-output-wait time and shuffle-write time
+    // Calculate total fetch-wait time, partial-output-wait time,
+    // initial read time and shuffle-write time
     stageTaskInfoMetrics.foreach { case (taskInfo, taskMetric) =>
       taskMetric.shuffleReadMetrics match {
         case Some(metric) =>
           stageData.fetchWaitTime += metric.fetchWaitTime
           stageData.partialOutputWaitTime += metric.waitForPartialOutputTime
+          stageData.initialReadTime += metric.initialReadTime
         case _ =>
       }
       taskMetric.shuffleWriteMetrics match {
@@ -171,7 +173,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     log.info("75th percentile: {} ms", stageData.percent75)
     log.info("95th percentile: {} ms", stageData.percent95)
     log.info("Time block for partial map output: {} ms", stageData.partialOutputWaitTime)
-
+    log.info("Initial read time: {} ms", stageData.initialReadTime)
     val cpuIdle = timers((info.stageId, info.attemptId)).elapsed
     log.info("Executor idle time: {}", cpuIdle)
 

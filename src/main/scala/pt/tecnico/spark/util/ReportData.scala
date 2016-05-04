@@ -33,7 +33,8 @@ case class StageData(
     var startTime: Long = 0,
     var completionTime: Long = 0,
     var partialOutputWaitTime: Long = 0,
-    var failed: Boolean = false
+    var failed: Boolean = false,
+    var initialReadTime: Long = 0
   ) {
   def runtime = completionTime - startTime
 }
