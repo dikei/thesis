@@ -49,8 +49,12 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     } else {
       s"${appData.id}-${appData.name}.json"
     }
-    val writer = new PrintWriter(new FileWriter(new File(statisticDir, jsonFile)))
+    val statDirs = new File(statisticDir)
+    if (!statDirs.exists()) {
+      statDirs.mkdirs()
+    }
 
+    val writer = new PrintWriter(new FileWriter(new File(statDirs, jsonFile)))
     appData.end = applicationEnd.time
     implicit val formats = Serialization.formats(NoTypeHints)
     try {
