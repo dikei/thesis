@@ -27,6 +27,7 @@ public class StageRuntimeStatistic {
     private Double upload;
     private Double download;
     private Long partialOutputWaitTime;
+    private Long initialReadTime;
 
     public StageRuntimeStatistic() {
     }
@@ -51,7 +52,8 @@ public class StageRuntimeStatistic {
                                  Double systemLoad,
                                  Double upload,
                                  Double download,
-                                 Long partialOutputWaitTime) {
+                                 Long partialOutputWaitTime,
+                                 Long initialReadTime) {
         this.stageId = stageId;
         this.average = average;
         this.fastest = fastest;
@@ -73,6 +75,15 @@ public class StageRuntimeStatistic {
         this.upload = upload;
         this.download = download;
         this.partialOutputWaitTime = partialOutputWaitTime;
+        this.initialReadTime = initialReadTime;
+    }
+
+    public Long getInitialReadTime() {
+        return initialReadTime;
+    }
+
+    public void setInitialReadTime(Long initialReadTime) {
+        this.initialReadTime = initialReadTime;
     }
 
     public Long getPartialOutputWaitTime() {

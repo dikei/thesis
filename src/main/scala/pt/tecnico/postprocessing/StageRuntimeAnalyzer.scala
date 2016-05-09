@@ -89,12 +89,14 @@ object StageRuntimeAnalyzer {
     val (averageRuntime, bestRuntime, worseRuntime, average) = processJsonInput(statsDir, rrdFile)
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
-      "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime", "PartialOutputWaitTime", "FetchWaitTime"
+      "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime",
+      "InitialReadTime", "PartialOutputWaitTime", "FetchWaitTime"
     )
 
     val numberFormater = new FmtNumber(".##")
     val networkFormatter = new FmtNumber("#,###")
     val writeProcessors = Array[CellProcessor] (
+      new NotNull(),
       new NotNull(),
       new NotNull(),
       new NotNull(),
@@ -230,7 +232,8 @@ object StageRuntimeAnalyzer {
             systemLoad,
             upload,
             download,
-            stageData.partialOutputWaitTime
+            stageData.partialOutputWaitTime,
+            stageData.initialReadTime
           )
         }.filter { s =>
           !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
@@ -258,7 +261,8 @@ object StageRuntimeAnalyzer {
             s1.getSystemLoad + s2.getSystemLoad,
             s1.getUpload + s2.getUpload,
             s1.getDownload + s2.getDownload,
-            s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime
+            s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime,
+            s1.getInitialReadTime + s2.getInitialReadTime
           )
         }
         val count = validRuns.length
@@ -283,7 +287,8 @@ object StageRuntimeAnalyzer {
           total.getSystemLoad / count,
           total.getUpload / count,
           total.getDownload / count,
-          total.getPartialOutputWaitTime / count / 1000
+          total.getPartialOutputWaitTime / count / 1000,
+          total.getInitialReadTime / count / 1000
         )
       }.toArray.sortBy(_.getStageId)
 
@@ -827,7 +832,8 @@ object StageRuntimeAnalyzer {
             s1.getSystemLoad + s2.getSystemLoad,
             s1.getUpload + s2.getUpload,
             s1.getDownload + s2.getDownload,
-            s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime
+            s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime,
+            s1.getInitialReadTime + s2.getInitialReadTime
           )
         }
         val count = validRuns.length
@@ -852,7 +858,8 @@ object StageRuntimeAnalyzer {
           total.getSystemLoad / count,
           total.getUpload / count,
           total.getDownload / count,
-          total.getPartialOutputWaitTime / count / 1000
+          total.getPartialOutputWaitTime / count / 1000,
+          total.getInitialReadTime / count / 1000
         )
       }.toArray.sortBy(_.getStageId)
 
