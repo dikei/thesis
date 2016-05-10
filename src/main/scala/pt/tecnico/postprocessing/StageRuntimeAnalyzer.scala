@@ -2,23 +2,19 @@ package pt.tecnico.postprocessing
 
 import java.awt.{Color, Font}
 import java.io.{File, FileReader, FileWriter}
-import java.text.DateFormat
 import java.util.Date
 import java.util.regex.Pattern
 
 import com.google.common.io.PatternFilenameFilter
 import net.stamfest.rrd._
 import org.jfree.chart.axis._
-import org.jfree.chart.labels.IntervalCategoryToolTipGenerator
 import org.jfree.chart.plot._
-import org.jfree.chart.renderer.category.{CategoryItemRenderer, GanttRenderer}
 import org.jfree.chart.renderer.xy.StandardXYItemRenderer
-import org.jfree.chart.urls.StandardCategoryURLGenerator
 import org.jfree.chart.util.RelativeDateFormat
-import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart}
+import org.jfree.chart.{ChartUtilities, JFreeChart}
 import org.jfree.data.gantt.{Task, TaskSeries, TaskSeriesCollection}
 import org.jfree.data.time.{Second, SimpleTimePeriod, TimeSeries, TimeSeriesCollection}
-import org.jfree.ui.RectangleInsets
+import org.jfree.ui.{RectangleAnchor, RectangleInsets}
 import org.json4s._
 import org.json4s.native.JsonMethods._
 import org.supercsv.cellprocessor._
@@ -72,7 +68,7 @@ object StageRuntimeAnalyzer {
   val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time\\.rrd|disk-vda\\/disk_io_time\\.rrd")
   val loadPattern = Pattern.compile("load\\/load\\.rrd")
   // Blacklist the master node from cluster averages
-  val blacklisted = Pattern.compile("testinstance-06-1\\.novalocal")
+  val blacklisted = Pattern.compile("testinstance-07\\.novalocal")
 
   def main(args: Array[String]): Unit = {
     if (args.length < 3) {
@@ -90,12 +86,13 @@ object StageRuntimeAnalyzer {
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
       "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime",
-      "InitialReadTime", "PartialOutputWaitTime", "FetchWaitTime"
+      "InitialReadTime", "PartialOutputWaitTime", "FetchWaitTime", "ShuffleWriteTime"
     )
 
     val numberFormater = new FmtNumber(".##")
     val networkFormatter = new FmtNumber("#,###")
     val writeProcessors = Array[CellProcessor] (
+      new NotNull(),
       new NotNull(),
       new NotNull(),
       new NotNull(),
@@ -282,7 +279,7 @@ object StageRuntimeAnalyzer {
           total.getTotalTaskRuntime / count / 1000,
           total.getStageRuntime / count / 1000,
           total.getFetchWaitTime / count / 1000,
-          total.getShuffleWriteTime / count / 1000,
+          total.getShuffleWriteTime / count / 1000000000,
           total.getCpuUsage / count,
           total.getSystemLoad / count,
           total.getUpload / count,
@@ -466,16 +463,49 @@ object StageRuntimeAnalyzer {
   }
 
   def plotStageGanttChart(runs: Seq[(AppData, mutable.Buffer[StageData], String)]): Unit = {
+    val jobFont = new Font("Dialog", Font.PLAIN, 40)
+    val jobBackgrounds = Array (
+      new Color(247,247,247),
+      new Color(99,99,99)
+    )
+
     runs.foreach { case (appData, stages, outputPrefix) =>
       val collection = new TaskSeriesCollection()
-      stages.groupBy(_.jobId).toList.sortBy(_._1)
-      .foreach { case (jobId, jobStages) =>
-        val taskSeries = new TaskSeries(s"$jobId")
-        jobStages.sortBy(_.startTime).foreach { stage =>
-          taskSeries.add(new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime)))
+      val markers = mutable.Buffer[IntervalMarker]()
+      val taskSeries = new TaskSeries("All stages")
+      var index = 0
+      stages.groupBy(_.jobId).toList.sortBy(_._1).foreach { case (jobId, jobStages) =>
+        val sortedStages = jobStages.sortBy(_.startTime)
+        var startTime = java.lang.Long.MAX_VALUE
+        var endTime = -1L
+        sortedStages.foreach { stage =>
+          if (startTime > stage.startTime) {
+            startTime = stage.startTime
+          }
+          if (endTime < stage.completionTime) {
+            endTime = stage.completionTime
+          }
+          val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
+          val initialReadFinished = stage.startTime + stage.initialReadTime / 24
+          val waitFinished = initialReadFinished + stage.partialOutputWaitTime / 24
+          val shuffleWriteStart = stage.completionTime - stage.shuffleWriteTime / 1000000 / 24
+          task.addSubtask(new Task("Initial read", new SimpleTimePeriod(stage.startTime, initialReadFinished)))
+          task.addSubtask(new Task("Wait for data", new SimpleTimePeriod(initialReadFinished, waitFinished)))
+          task.addSubtask(new Task("Execution", new SimpleTimePeriod(waitFinished, shuffleWriteStart)))
+          task.addSubtask(new Task("Shuffle write", new SimpleTimePeriod(shuffleWriteStart, stage.completionTime)))
+          taskSeries.add(task)
         }
-        collection.add(taskSeries)
+        val jobMarker = new IntervalMarker(startTime, endTime)
+        jobMarker.setLabel(jobId.toString)
+        jobMarker.setAlpha(0.2f)
+        jobMarker.setLabelFont(jobFont)
+        jobMarker.setLabelAnchor(RectangleAnchor.TOP)
+        jobMarker.setLabelOffset(new RectangleInsets(20, 0, 0, 0))
+        jobMarker.setPaint(jobBackgrounds(index % jobBackgrounds.length))
+        index += 1
+        markers += jobMarker
       }
+      collection.add(taskSeries)
       val dateFormat = new RelativeDateFormat(appData.start)
       val timeAxis = new DateAxis("Time")
       timeAxis.setAutoRange(true)
@@ -485,12 +515,16 @@ object StageRuntimeAnalyzer {
       timeAxis.setLowerMargin(0.02)
       timeAxis.setUpperMargin(0.02)
 
-      val categoryAxis: CategoryAxis = new CategoryAxis("Stages")
+      val categoryAxis = new CategoryAxis("Stages")
 
-      val renderer = new GanttRenderer
+      val renderer = new StageGanttRenderer
+      renderer.setShadowVisible(false)
       val plot = new CategoryPlot(collection, categoryAxis, timeAxis, renderer)
       plot.setOrientation(PlotOrientation.HORIZONTAL)
-      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
+      markers.foreach { marker =>
+        plot.addRangeMarker(marker)
+      }
+      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, false)
       val output = new File( s"$outputPrefix-stages.png" )
       val width = 1280
       val height = 960
@@ -714,7 +748,7 @@ object StageRuntimeAnalyzer {
       stagesDuration.sortBy(_._2).zipWithIndex.foreach { case ((id, start, end), index) =>
         val intervalMarker = new IntervalMarker(start, end)
         intervalMarker.setLabel(id.toString)
-        intervalMarker.setAlpha(0.1f)
+        intervalMarker.setAlpha(0.2f)
         intervalMarker.setLabelFont(labelFont)
         intervalMarker.setPaint(colors(index % colors.length))
         if (index % 2 == 0) {
