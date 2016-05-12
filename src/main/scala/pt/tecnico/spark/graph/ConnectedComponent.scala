@@ -1,7 +1,7 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.graphx.GraphLoader
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.graphx.{GraphLoader, PartitionStrategy}
+import org.apache.spark.{SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
 /**
@@ -28,7 +28,9 @@ object ConnectedComponent {
     val listener = new StageRuntimeReportListener(statsDir)
     sc.addSparkListener(listener)
 
-    val graph = GraphLoader.edgeListFile(sc, input, numEdgePartitions = partitionCount)
+    val graph = GraphLoader
+      .edgeListFile(sc, input, numEdgePartitions = partitionCount)
+      .partitionBy(PartitionStrategy.EdgePartition2D)
 
     // Calculate and save the connected components
     if (output.isEmpty) {

@@ -1,6 +1,6 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.graphx.GraphLoader
+import org.apache.spark.graphx.{GraphLoader, PartitionStrategy}
 import org.apache.spark.{SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
@@ -29,7 +29,9 @@ object PageRank {
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statisticDir))
 
-    val graph = GraphLoader.edgeListFile(sc, input, numEdgePartitions = partitions)
+    val graph = GraphLoader
+      .edgeListFile(sc, input, numEdgePartitions = partitions)
+      .partitionBy(PartitionStrategy.EdgePartition2D)
 
     // Run page rank algorithm and save the result
     if (output.isEmpty) {
