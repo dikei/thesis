@@ -1,6 +1,7 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.graphx.PartitionStrategy
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.graphx.util.GraphGenerators
 
 /**
@@ -24,7 +25,9 @@ object GraphGen {
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     val sc = new SparkContext(conf)
 
-    val graph = GraphGenerators.logNormalGraph(sc, noVertices, seed = randomSeed, numEParts = noPartition)
+    val graph = GraphGenerators
+      .logNormalGraph(sc, noVertices, seed = randomSeed, numEParts = noPartition)
+      .partitionBy(PartitionStrategy.EdgePartition2D)
 
     graph.edges.map { edge =>
       edge.srcId + " " + edge.dstId
