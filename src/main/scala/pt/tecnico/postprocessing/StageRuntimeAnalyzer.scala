@@ -9,11 +9,16 @@ import com.google.common.io.PatternFilenameFilter
 import net.stamfest.rrd._
 import org.jfree.chart.axis._
 import org.jfree.chart.plot._
-import org.jfree.chart.renderer.xy.StandardXYItemRenderer
+import org.jfree.chart.renderer.xy.{StandardXYBarPainter, StandardXYItemRenderer, XYBarRenderer}
+import org.jfree.chart.title.TextTitle
 import org.jfree.chart.util.RelativeDateFormat
-import org.jfree.chart.{ChartUtilities, JFreeChart}
+import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart}
+import org.jfree.data.function.NormalDistributionFunction2D
 import org.jfree.data.gantt.{Task, TaskSeries, TaskSeriesCollection}
+import org.jfree.data.general.DatasetUtilities
+import org.jfree.data.statistics.{SimpleHistogramBin, SimpleHistogramDataset}
 import org.jfree.data.time.{Second, SimpleTimePeriod, TimeSeries, TimeSeriesCollection}
+import org.jfree.data.xy.DefaultXYDataset
 import org.jfree.ui.{RectangleAnchor, RectangleInsets}
 import org.json4s._
 import org.json4s.native.JsonMethods._
@@ -80,9 +85,10 @@ object StageRuntimeAnalyzer {
     val statsDir = args(0)
     val rrdFile = args(1)
     val outFile = args(2)
+    val runtimeGraph = args(3)
 
 //    val (averageRuntime: Long, average: Array[StageRuntimeStatistic]) = processCsvInput(statsDir, rrdFile)
-    val (averageRuntime, bestRuntime, worseRuntime, average) = processJsonInput(statsDir, rrdFile)
+    val average = processJsonInput(statsDir, rrdFile, runtimeGraph)
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
       "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime",
@@ -107,17 +113,12 @@ object StageRuntimeAnalyzer {
       average.foreach { stage =>
         writer.write(stage, headers, writeProcessors)
       }
-      writer.writeComment("#")
-      writer.writeComment(s"#Average runtime: $averageRuntime ms")
-      writer.writeComment(s"#Best runtime: $bestRuntime ms")
-      writer.writeComment(s"#Worse runtime: $worseRuntime ms")
-      writer.writeComment("#")
     } finally {
       writer.close()
     }
   }
 
-  def processJsonInput(statsDir: String, rrdFile: String): (Long, Long, Long, Array[StageRuntimeStatistic]) = {
+  def processJsonInput(statsDir: String, rrdFile: String, runtimeGraph: String): Array[StageRuntimeStatistic] = {
     implicit val formats = DefaultFormats
 
     val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.json$"))
@@ -155,17 +156,6 @@ object StageRuntimeAnalyzer {
         source.close()
       }
     }
-
-    val appRuntimes = filesData.map { case (appData, _, _) =>
-      appData.runtime
-    }
-
-    val averageRuntime = appRuntimes.sum / appRuntimes.length
-    val bestRuntime = appRuntimes.min
-    val worseRuntime = appRuntimes.max
-    println(s"Average runtime: $averageRuntime")
-    println(s"Best runtime: $bestRuntime")
-    println(s"Worse runtime: $worseRuntime")
 
     val average = filesData.flatMap(run => run._2).groupBy(_.stageId)
       .map { case (stageId, runs) =>
@@ -304,7 +294,10 @@ object StageRuntimeAnalyzer {
     println("Plotting stage gantt chart")
     plotStageGanttChart(filesData)
 
-    (averageRuntime, bestRuntime, worseRuntime, average)
+    println("Plotting runtime distribution")
+    plotRuntimeDistribution(filesData, runtimeGraph)
+
+    average
   }
 
   def plotGraphJson(
@@ -530,6 +523,92 @@ object StageRuntimeAnalyzer {
       val height = 960
       ChartUtilities.saveChartAsPNG(output, chart, width, height)
     }
+  }
+
+  def plotRuntimeDistribution(runs: Seq[(AppData, mutable.Buffer[StageData], String)], output: String): Unit = {
+    var variance: Double = 0
+    var totalRuntimes: Long = 0
+    var bestRuntime = Long.MaxValue
+    var worseRuntime = Long.MinValue
+    val appRuntimes = runs.map { case (appData, _, _) =>
+      totalRuntimes += appData.runtime
+      if (bestRuntime > appData.runtime) {
+        bestRuntime = appData.runtime
+      }
+      if (worseRuntime < appData.runtime) {
+        worseRuntime = appData.runtime
+      }
+      appData.runtime
+    }
+    val averageRuntime = totalRuntimes / appRuntimes.length
+
+    println(s"Average runtime: $averageRuntime")
+    println(s"Best runtime: $bestRuntime")
+    println(s"Worse runtime: $worseRuntime")
+
+    val dataset = new SimpleHistogramDataset("Runtime")
+    var binCount = 0
+    val binsize = 10
+    val averageInSecond = averageRuntime / 1000
+    while(averageInSecond - binsize * binCount > bestRuntime / 1000 ||
+      averageInSecond + binsize * binCount < worseRuntime / 1000 ) {
+      dataset.addBin(
+        new SimpleHistogramBin(
+          averageInSecond - binsize * (binCount + 1),
+          averageInSecond - binsize * binCount,
+          true,
+          false)
+      )
+      dataset.addBin(
+        new SimpleHistogramBin(
+          averageInSecond + binsize * binCount,
+          averageInSecond + binsize * (binCount + 1),
+          true,
+          false)
+      )
+      binCount += 1
+    }
+
+    appRuntimes.foreach { runtime =>
+      variance += Math.pow(runtime - averageRuntime, 2)
+      dataset.addObservation(runtime / 1000)
+    }
+    val standardDeviation = Math.round(Math.sqrt(variance))
+
+    dataset.setAdjustForBinSize(false)
+    val chart = ChartFactory.createHistogram(
+      "Execution time graph",
+      "Execution Time",
+      "Count",
+      dataset,
+      PlotOrientation.VERTICAL,
+      false,
+      false,
+      false
+    )
+
+    val plot = chart.getXYPlot
+    plot.setBackgroundPaint(Color.white)
+    plot.setDomainGridlinePaint(Color.lightGray)
+    plot.setRangeGridlinePaint(Color.lightGray)
+    val yAxis = plot.getRangeAxis
+    yAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits())
+    val xAxis = plot.getDomainAxis
+    xAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits())
+
+    val renderer = plot.getRenderer.asInstanceOf[XYBarRenderer]
+    renderer.setDrawBarOutline(true)
+    renderer.setBarPainter(new StandardXYBarPainter())
+    renderer.setShadowVisible(false)
+
+    chart.addSubtitle(new TextTitle(s"Average time: $averageInSecond s"))
+    chart.addSubtitle(new TextTitle(s"Standard deviation: ${standardDeviation / 1000} s"))
+    chart.addSubtitle(new TextTitle(s"Best time: ${bestRuntime / 1000} s"))
+    chart.addSubtitle(new TextTitle(s"Worse time: ${worseRuntime / 1000} s"))
+    val width = 1280
+    val height = 960
+
+    ChartUtilities.saveChartAsPNG(new File(output), chart, width, height)
   }
 
   def plotCpuGraphPerRun(
