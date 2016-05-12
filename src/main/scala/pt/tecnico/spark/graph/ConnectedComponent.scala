@@ -31,6 +31,10 @@ object ConnectedComponent {
     val graph = GraphLoader.edgeListFile(sc, input, numEdgePartitions = partitionCount)
 
     // Calculate and save the connected components
-    graph.connectedComponents().vertices.saveAsTextFile(output)
+    if (output.isEmpty) {
+      graph.connectedComponents().vertices.foreachPartition(x => {})
+    } else {
+      graph.connectedComponents().vertices.saveAsTextFile(output)
+    }
   }
 }
