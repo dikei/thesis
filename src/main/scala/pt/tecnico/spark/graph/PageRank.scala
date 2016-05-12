@@ -32,6 +32,12 @@ object PageRank {
     val graph = GraphLoader.edgeListFile(sc, input, numEdgePartitions = partitions)
 
     // Run page rank algorithm and save the result
-    graph.staticPageRank(iteration).vertices.saveAsTextFile(output)
+    if (output.isEmpty) {
+      // No output, we just call foreachPartition to force materialization
+      graph.staticPageRank(iteration).vertices.foreachPartition(x => {})
+    } else {
+      graph.staticPageRank(iteration).vertices.saveAsTextFile(output)
+    }
+
   }
 }

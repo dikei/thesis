@@ -27,6 +27,11 @@ object TriangleCount {
       .partitionBy(PartitionStrategy.RandomVertexCut)
 
     // Find the triangle count for each vertex
-    graph.triangleCount().vertices.saveAsTextFile(output)
+    if (output.isEmpty) {
+      // No output, we just call foreachPartition to force materialization
+      graph.triangleCount().vertices.foreachPartition(x => {})
+    } else {
+      graph.triangleCount().vertices.saveAsTextFile(output)
+    }
   }
 }
