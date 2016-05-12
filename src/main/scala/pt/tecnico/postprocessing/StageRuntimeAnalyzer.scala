@@ -9,6 +9,7 @@ import com.google.common.io.PatternFilenameFilter
 import net.stamfest.rrd._
 import org.jfree.chart.axis._
 import org.jfree.chart.plot._
+import org.jfree.chart.renderer.category.StandardBarPainter
 import org.jfree.chart.renderer.xy.{StandardXYBarPainter, StandardXYItemRenderer, XYBarRenderer}
 import org.jfree.chart.title.TextTitle
 import org.jfree.chart.util.RelativeDateFormat
@@ -511,6 +512,8 @@ object StageRuntimeAnalyzer {
       val categoryAxis = new CategoryAxis("Stages")
 
       val renderer = new StageGanttRenderer
+      renderer.setBarPainter(new StandardBarPainter)
+      renderer.setDrawBarOutline(true)
       renderer.setShadowVisible(false)
       val plot = new CategoryPlot(collection, categoryAxis, timeAxis, renderer)
       plot.setOrientation(PlotOrientation.HORIZONTAL)
