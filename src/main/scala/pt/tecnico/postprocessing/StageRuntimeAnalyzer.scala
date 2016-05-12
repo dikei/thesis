@@ -74,7 +74,7 @@ object StageRuntimeAnalyzer {
   val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time\\.rrd|disk-vda\\/disk_io_time\\.rrd")
   val loadPattern = Pattern.compile("load\\/load\\.rrd")
   // Blacklist the master node from cluster averages
-  val blacklisted = Pattern.compile("testinstance-07\\.novalocal")
+  val blacklisted = Pattern.compile("master\\.novalocal")
 
   def main(args: Array[String]): Unit = {
     if (args.length < 3) {
