@@ -30,7 +30,6 @@ object ConnectedComponent {
 
     val graph = GraphLoader
       .edgeListFile(sc, input, numEdgePartitions = partitionCount)
-      .partitionBy(PartitionStrategy.EdgePartition2D)
 
     // Calculate and save the connected components
     if (output.isEmpty) {

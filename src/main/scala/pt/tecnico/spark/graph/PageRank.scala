@@ -31,7 +31,6 @@ object PageRank {
 
     val graph = GraphLoader
       .edgeListFile(sc, input, numEdgePartitions = partitions)
-      .partitionBy(PartitionStrategy.EdgePartition2D)
 
     // Run page rank algorithm and save the result
     if (output.isEmpty) {
