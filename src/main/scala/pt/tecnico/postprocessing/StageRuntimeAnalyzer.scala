@@ -28,7 +28,7 @@ import org.supercsv.cellprocessor.constraint.NotNull
 import org.supercsv.cellprocessor.ift.CellProcessor
 import org.supercsv.io.{CsvBeanReader, CsvBeanWriter}
 import org.supercsv.prefs.CsvPreference
-import pt.tecnico.spark.util.{AppData, StageData, StageRuntimeStatistic}
+import pt.tecnico.spark.util.{AppData, ReadMethod, StageData, StageRuntimeStatistic}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -120,7 +120,7 @@ object StageRuntimeAnalyzer {
   }
 
   def processJsonInput(statsDir: String, rrdFile: String, runtimeGraph: String): Array[StageRuntimeStatistic] = {
-    implicit val formats = DefaultFormats
+    implicit val formats = DefaultFormats + new org.json4s.ext.EnumSerializer(ReadMethod)
 
     val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.json$"))
     val filesData = files.flatMap { f =>

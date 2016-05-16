@@ -2,7 +2,7 @@ package pt.tecnico.spark.util
 
 import java.io.{File, FileWriter, PrintWriter}
 
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.executor._
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.ExecutorInfo
 import org.apache.spark.{Logging, SparkEnv}
@@ -56,7 +56,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
 
     val writer = new PrintWriter(new FileWriter(new File(statDirs, jsonFile)))
     appData.end = applicationEnd.time
-    implicit val formats = Serialization.formats(NoTypeHints)
+    implicit val formats = Serialization.formats(NoTypeHints) + new org.json4s.ext.EnumSerializer(ReadMethod)
     try {
       // Write application data
       write(appData, writer)
@@ -116,74 +116,53 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
     stageData.completionTime = info.completionTime.get
     stageData.jobId = stageIdToJobId.getOrElse(info.stageId, -1)
 
+    val taskData = mutable.ArrayBuffer[TaskData]()
     val stageTaskInfoMetrics = taskInfoMetrics.get((info.stageId, info.attemptId)).get
 
-    // Calculate total fetch-wait time, partial-output-wait time,
-    // initial read time and shuffle-write time
+    // Store the tasks data inside stage data
     stageTaskInfoMetrics.foreach { case (taskInfo, taskMetric) =>
-      taskMetric.shuffleReadMetrics match {
+      val (_fetchWaitTime, _partialOutputWaitTime, _initialReadTime): (Long, Long, Long) =
+        taskMetric.shuffleReadMetrics match {
+          case Some(metric) =>
+            (metric.fetchWaitTime, metric.waitForPartialOutputTime, metric.initialReadTime)
+          case _ => (0, 0, 0)
+        }
+      val _shuffleWriteTime: Long = taskMetric.shuffleWriteMetrics match {
         case Some(metric) =>
-          stageData.fetchWaitTime += metric.fetchWaitTime
-          stageData.partialOutputWaitTime += metric.waitForPartialOutputTime
-          stageData.initialReadTime += metric.initialReadTime
-        case _ =>
+          metric.shuffleWriteTime
+        case _ => 0
       }
-      taskMetric.shuffleWriteMetrics match {
+      val (_inputBytesRead, _inputSource): (Long, ReadMethod.Value) = taskMetric.inputMetrics match {
         case Some(metric) =>
-          stageData.shuffleWriteTime += metric.shuffleWriteTime
-        case _ =>
+          val method = metric.readMethod match {
+            case DataReadMethod.Disk => ReadMethod.Disk
+            case DataReadMethod.Hadoop => ReadMethod.Hadoop
+            case DataReadMethod.Network => ReadMethod.Network
+            case DataReadMethod.Memory => ReadMethod.Memory
+          }
+          (metric.bytesRead, method)
+        case _ => (0, ReadMethod.None)
       }
+
+      taskData += new TaskData (
+        id = taskInfo.id,
+        index = taskInfo.index,
+        fetchWaitTime = _fetchWaitTime,
+        shuffleWriteTime = _shuffleWriteTime,
+        initialReadTime = _initialReadTime,
+        waitForPartialOutputTime = _partialOutputWaitTime,
+        inputBytesRead = _inputBytesRead,
+        inputSource = _inputSource,
+        duration = taskInfo.duration
+      )
     }
-
-    val durations = stageTaskInfoMetrics.map { case (taskInfo, taskMetric) =>
-      taskInfo.duration
-    }
-
-    durations.foreach { duration =>
-      stageData.totalTaskRuntime += duration
-      if (duration < stageData.fastest) {
-        stageData.fastest = duration
-      }
-      if (duration > stageData.slowest) {
-        stageData.slowest = duration
-      }
-    }
-
-    stageData.average = stageData.totalTaskRuntime / info.numTasks
-    val variance = durations.map { duration =>
-      val tmp = duration - stageData.average
-      tmp * tmp
-    }.sum / info.numTasks
-    stageData.standardDeviation = Math.sqrt(variance).round
-
-    val sortedDurations = durations.sorted
-    stageData.percent5 = sortedDurations((sortedDurations.length * 0.05).toInt)
-    stageData.percent25 = sortedDurations((sortedDurations.length * 0.25).toInt)
-    stageData.median = sortedDurations((sortedDurations.length * 0.5).toInt)
-    stageData.percent75 = sortedDurations((sortedDurations.length * 0.75).toInt)
-    stageData.percent95 = sortedDurations((sortedDurations.length * 0.95).toInt)
+    stageData.tasks = taskData.toArray[TaskData]
 
     log.info("Stage completed: {}", stageData.name)
     log.info("Number of tasks: {}", stageData.taskCount)
     log.info("Stage runtime: {} ms", stageData.runtime)
     log.info("Stage submission time: {}", stageData.startTime)
     log.info("Stage completion time: {}", stageData.completionTime)
-    log.info("Total task time: {} ms", stageData.totalTaskRuntime)
-    log.info("Fetch wait time: {} ms", stageData.fetchWaitTime)
-    log.info("Shuffle write time: {} ms", stageData.shuffleWriteTime)
-    log.info("Average task runtime: {} ms", stageData.average)
-    log.info("Fastest task: {} ms", stageData.fastest)
-    log.info("Slowest task: {} ms", stageData.slowest)
-    log.info("Standard deviation: {} ms", stageData.standardDeviation)
-    log.info("5th percentile: {} ms", stageData.percent5)
-    log.info("25th percentile: {} ms", stageData.percent25)
-    log.info("Median: {} ms", stageData.median)
-    log.info("75th percentile: {} ms", stageData.percent75)
-    log.info("95th percentile: {} ms", stageData.percent95)
-    log.info("Time block for partial map output: {} ms", stageData.partialOutputWaitTime)
-    log.info("Initial read time: {} ms", stageData.initialReadTime)
-    val cpuIdle = timers((info.stageId, info.attemptId)).elapsed
-    log.info("Executor idle time: {}", cpuIdle)
 
     // Clear out the buffer to save memory
     taskInfoMetrics.remove((info.stageId, info.attemptId))
