@@ -60,22 +60,6 @@ object StageRuntimeAnalyzer {
     new ParseLong() // Completion time
   )
 
-  val labelFont = new Font("Dialog", Font.PLAIN, 25)
-  val colors = Array (
-    new Color(230,97,1),
-    new Color(253,184,99),
-    new Color(178,171,210),
-    new Color(94,60,153)
-  )
-
-  val rrdParser = new RRDp(".", null)
-  val cpuPattern = Pattern.compile("cpu\\/percent-idle\\.rrd")
-  val networkPattern = Pattern.compile("interface-eth0\\/if_octets\\.rrd")
-  val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time\\.rrd|disk-vda\\/disk_io_time\\.rrd")
-  val loadPattern = Pattern.compile("load\\/load\\.rrd")
-  // Blacklist the master node from cluster averages
-  val blacklisted = Pattern.compile("master\\.novalocal")
-
   def main(args: Array[String]): Unit = {
     if (args.length < 3) {
       println("Usage: ")
@@ -84,124 +68,122 @@ object StageRuntimeAnalyzer {
     }
 
     val statsDir = args(0)
-    val rrdFile = args(1)
+    val rrdDir = args(1)
     val outFile = args(2)
-    val runtimeGraph = args(3)
 
-//    val (averageRuntime: Long, average: Array[StageRuntimeStatistic]) = processCsvInput(statsDir, rrdFile)
-    val average = processJsonInput(statsDir, rrdFile, runtimeGraph)
-    val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
-    val headers = Array (
-      "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime",
-      "InitialReadTime", "PartialOutputWaitTime", "FetchWaitTime", "ShuffleWriteTime",
-      "MemoryInput", "HadoopInput", "NetworkInput", "DiskInput"
+    val data = Utils.parseJsonInput(statsDir)
+
+    println("Generating csv")
+    generateCsv(data, rrdDir, outFile)
+
+    println("Plotting stage gantt chart")
+    plotStageGanttChart(data)
+  }
+
+  def plotStageGanttChart(data: Seq[(AppData, Seq[StageData], String)]): Unit = {
+    val jobFont = new Font("Dialog", Font.PLAIN, 40)
+    val jobBackgrounds = Array (
+      new Color(247,247,247),
+      new Color(99,99,99)
     )
 
-    val numberFormater = new FmtNumber(".##")
-    val sizeFormatter = new FmtNumber("#,### MB")
-    val writeProcessors = Array[CellProcessor] (
-      new NotNull(),
-      new NotNull(),
-      new NotNull(),
-      new NotNull(),
-      new NotNull(),
-      new NotNull(),
-      new NotNull(),
-      new NotNull(),
-      new NotNull(),
-      sizeFormatter,
-      sizeFormatter,
-      sizeFormatter,
-      sizeFormatter
-    )
-    try {
-      writer.writeHeader(headers:_*)
-      average.foreach { stage =>
-        writer.write(stage, headers, writeProcessors)
+    data.foreach { case (appData, stages, outputPrefix) =>
+      val collection = new TaskSeriesCollection()
+      val markers = mutable.Buffer[IntervalMarker]()
+      val taskSeries = new TaskSeries("All stages")
+      var index = 0
+      stages.groupBy(_.jobId).toList.sortBy(_._1).foreach { case (jobId, jobStages) =>
+        val sortedStages = jobStages.sortBy(_.startTime)
+        var startTime = java.lang.Long.MAX_VALUE
+        var endTime = -1L
+        sortedStages.foreach { stage =>
+          if (startTime > stage.startTime) {
+            startTime = stage.startTime
+          }
+          if (endTime < stage.completionTime) {
+            endTime = stage.completionTime
+          }
+          val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
+          val initialReadFinished = stage.startTime + stage.initialReadTime / 24
+          val waitFinished = initialReadFinished + stage.partialOutputWaitTime / 24
+          val shuffleWriteStart = stage.completionTime - stage.shuffleWriteTime / 1000000 / 24
+          task.addSubtask(new Task("Initial read", new SimpleTimePeriod(stage.startTime, initialReadFinished)))
+          task.addSubtask(new Task("Wait for data", new SimpleTimePeriod(initialReadFinished, waitFinished)))
+          task.addSubtask(new Task("Execution", new SimpleTimePeriod(waitFinished, shuffleWriteStart)))
+          task.addSubtask(new Task("Shuffle write", new SimpleTimePeriod(shuffleWriteStart, stage.completionTime)))
+          taskSeries.add(task)
+        }
+        val jobMarker = new IntervalMarker(startTime, endTime)
+        jobMarker.setLabel(jobId.toString)
+        jobMarker.setAlpha(0.2f)
+        jobMarker.setLabelFont(jobFont)
+        jobMarker.setLabelAnchor(RectangleAnchor.TOP)
+        jobMarker.setLabelOffset(new RectangleInsets(20, 0, 0, 0))
+        jobMarker.setPaint(jobBackgrounds(index % jobBackgrounds.length))
+        index += 1
+        markers += jobMarker
       }
-    } finally {
-      writer.close()
+      collection.add(taskSeries)
+      val dateFormat = new RelativeDateFormat(appData.start)
+      val timeAxis = new DateAxis("Time")
+      timeAxis.setAutoRange(true)
+      timeAxis.setDateFormatOverride(dateFormat)
+      timeAxis.setMinimumDate(new Date(appData.start))
+      timeAxis.setMaximumDate(new Date(appData.end))
+      timeAxis.setLowerMargin(0.02)
+      timeAxis.setUpperMargin(0.02)
+
+      val categoryAxis = new CategoryAxis("Stages")
+
+      val renderer = new StageGanttRenderer
+      renderer.setBarPainter(new StandardBarPainter)
+      renderer.setDrawBarOutline(true)
+      renderer.setShadowVisible(false)
+      val plot = new CategoryPlot(collection, categoryAxis, timeAxis, renderer)
+      plot.setOrientation(PlotOrientation.HORIZONTAL)
+      markers.foreach { marker =>
+        plot.addRangeMarker(marker)
+      }
+      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, false)
+      val output = new File( s"$outputPrefix-stages.png" )
+      val width = 1280
+      val height = 960
+      ChartUtilities.saveChartAsPNG(output, chart, width, height)
     }
   }
 
-  def processJsonInput(statsDir: String, rrdFile: String, runtimeGraph: String): Array[StageRuntimeStatistic] = {
-    implicit val formats = DefaultFormats + new org.json4s.ext.EnumSerializer(ReadMethod)
-
-    val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.json$"))
-    val filesData = files.flatMap { f =>
-      val source = Source.fromFile(f)
-      try {
-        val fileIter = source.getLines()
-        val appData = parse(fileIter.next()).extract[AppData]
-        val stageCount = fileIter.next().toInt
-        val stages = mutable.Buffer[StageData]()
-        var i = 0
-        var failureDetected = false
-        while (i < stageCount) {
-          val stage = parse(fileIter.next()).extract[StageData]
-          if (stage.failed) {
-            failureDetected = false
-            i = stageCount
-          } else {
-            stages += stage
-          }
-          i += 1
-        }
-        // Skip over file that contained failed run
-        if (!failureDetected) {
-          Seq((appData, stages, f.getAbsolutePath))
-        } else {
-          Seq()
-        }
-      } catch {
-        case e: Exception =>
-          println(s"Invalid report: ${f.getAbsolutePath}")
-          Seq()
-      }
-      finally {
-        source.close()
-      }
-    }
-
-    val average = filesData.flatMap(run => run._2).groupBy(_.stageId)
+  def generateCsv(data: Array[(AppData, Seq[StageData], String)], rrdDir: String, outFile: String): Unit = {
+    val average = data.flatMap(run => run._2).groupBy(_.stageId)
       .map { case (stageId, runs) =>
         val validRuns = runs.map { case (stageData: StageData) =>
-          val startDir = new File(rrdFile)
-          val cpuUsage = 100 - computeClusterAverage(
-            rrdParser,
-            cpuPattern,
-            blacklisted,
+          val startDir = new File(rrdDir)
+          val cpuUsage = 100 - Utils.computeClusterAverage(
+            Utils.cpuPattern,
             startDir,
             stageData.startTime,
             stageData.completionTime,
-            computeIdleCpuNodeAverage
+            Utils.computeIdleCpuNodeAverage
           )
-          val systemLoad = computeClusterAverage(
-            rrdParser,
-            loadPattern,
-            blacklisted,
+          val systemLoad = Utils.computeClusterAverage(
+            Utils.loadPattern,
             startDir,
             stageData.startTime,
             stageData.completionTime,
-            computeLoadNodeAverage
+            Utils.computeLoadNodeAverage
           )
-          val upload = computeClusterAverage(
-            rrdParser,
-            networkPattern,
-            blacklisted,
+          val upload = Utils.computeClusterAverage(
+            Utils.networkPattern,
             startDir,
             stageData.startTime,
             stageData.completionTime,
-            computeUploadNodeAverage
+            Utils.computeUploadNodeAverage
           )
-          val download = computeClusterAverage(
-            rrdParser,
-            networkPattern,
-            blacklisted,
+          val download = Utils.computeClusterAverage(
+            Utils.networkPattern,
             startDir,
             stageData.startTime,
             stageData.completionTime,
-            computeDownloadNodeAverage
+            Utils.computeDownloadNodeAverage
           )
 
           new StageRuntimeStatistic(
@@ -296,574 +278,37 @@ object StageRuntimeAnalyzer {
         )
       }.toArray.sortBy(_.getStageId)
 
-    // Plot CPU graph
-    println("Plotting CPU graph")
-    plotGraphJson(rrdFile, filesData, rrdParser, cpuPattern, blacklisted, plotCpuGraphPerRun, clusterAverage = true)
-
-    // Plot network graph
-    println("Plotting network graph")
-    plotGraphJson(rrdFile, filesData, rrdParser, networkPattern, blacklisted, plotNetworkGraphPerRun, clusterAverage = true)
-
-    // Plot diskgraph
-    println("Plotting disk IO graph")
-    plotGraphJson(rrdFile, filesData, rrdParser, diskPattern, blacklisted, plotDiskGraphPerRun, clusterAverage = true)
-
-    println("Plotting stage gantt chart")
-    plotStageGanttChart(filesData)
-
-    println("Plotting runtime distribution")
-    plotRuntimeDistribution(filesData, runtimeGraph)
-
-    average
-  }
-
-  def plotGraphJson(
-      rrdFile: String,
-      runs: Seq[(AppData, mutable.Buffer[StageData], String)],
-      rrdParser: RRDp,
-      matchPattern: Pattern,
-      blacklisted: Pattern,
-      plotFunc: (RRDp, Array[File], String, Long, Long, Seq[(Int, Long, Long)], Boolean) => Unit,
-      clusterAverage: Boolean = false): Unit = {
-    runs.foreach { case (appData, stages, outputPrefix) =>
-      val start = appData.start
-      val end = appData.end
-      val stagesDuration = stages.map(s => (s.stageId, s.startTime, s.completionTime))
-      val rrdFiles = findRrd(new File(rrdFile), matchPattern).filter { f =>
-        !blacklisted.matcher(f.getAbsolutePath).find()
-      }
-      plotFunc(rrdParser, rrdFiles, outputPrefix, start, end, stagesDuration, clusterAverage)
-    }
-  }
-
-  def findRrd(startDir: File, p: Pattern): Array[File] = {
-    val these = startDir.listFiles
-    val good = these.filter { f =>
-      p.matcher(f.getPath).find()
-    }
-    good ++ these.filter(_.isDirectory).flatMap {
-      findRrd(_, p)
-    }
-  }
-
-  def computeClusterAverage(
-      rrdParser: RRDp,
-      matchPattern: Pattern,
-      blacklisted: Pattern,
-      startDir: File,
-      startTime: Long,
-      endTime: Long,
-      procFunc: (RRDp, String, Long, Long) => Double
-      ): Double = {
-    val files = findRrd(startDir, matchPattern)
-    val validResult = files.filter { f =>
-      !blacklisted.matcher(f.getAbsolutePath).find()
-    }.map { f =>
-      procFunc(rrdParser, f.getPath, startTime, endTime)
-    }.filter(!_.isNaN)
-    val total = validResult.reduce[Double] { case (d1: Double, d2: Double) =>
-        d1 + d2
-    }
-    if (validResult.length > 0)
-      total / validResult.length
-    else
-      Double.NaN
-  }
-
-  def computeLoadNodeAverage(rrdParser: RRDp, file: String, startTime: Long, endTime: Long): Double = {
-    val command = Array (
-      "fetch", file, "AVERAGE",
-      "-s", (startTime / 1000).toString,
-      "-e", (endTime / 1000).toString
-    )
-    val rddResult = rrdParser.command(command)
-    // filtering unneeded + empty lines
-    val lines = rddResult.getOutput.trim().split("\n")
-      .filter { line =>
-        line.contains(":") && !line.contains("nan")
-      }
-    if (lines.length > 0) {
-      val totalLines = lines.map { line =>
-        val tokens = line.split(":|\\s")
-        tokens(2).trim().toDouble
-      }.reduce[Double] { case (f1: Double, f2: Double) =>
-        f1 + f2
-      }
-      totalLines / lines.length
-    } else {
-      Double.NaN
-    }
-  }
-
-  def computeIdleCpuNodeAverage(rrdParser: RRDp, file: String, startTime: Long, endTime: Long): Double = {
-    val command = Array[String] (
-      "fetch", file, "AVERAGE",
-      "-s", (startTime / 1000).toString,
-      "-e", (endTime / 1000).toString
-    )
-    val rddResult = rrdParser.command(command)
-
-    // filtering unneeded + empty lines
-    val lines = rddResult.getOutput.trim().split("\n")
-      .filter { line =>
-        line.contains(":") && !line.contains("nan")
-      }
-    if (lines.length > 0) {
-      val totalLines = lines.map { line =>
-        val tokens = line.split(":")
-        tokens(1).trim().toDouble
-      }.reduce[Double] { case (f1: Double, f2: Double) =>
-        f1 + f2
-      }
-      totalLines / lines.length
-    } else {
-      Double.NaN
-    }
-  }
-
-  def computeUploadNodeAverage(rrdParser: RRDp, file: String, startTime: Long, endTime: Long): Double = {
-    val command = Array[String] (
-      "fetch", file, "AVERAGE",
-      "-s", (startTime / 1000).toString,
-      "-e", (endTime / 1000).toString
-    )
-    val rddResult = rrdParser.command(command)
-    // filtering unneeded + empty lines
-    val lines = rddResult.getOutput.trim().split("\n")
-      .filter { line =>
-        line.contains(":") && !line.contains("nan")
-      }
-    if (lines.length > 0) {
-      val totalLines = lines.map { line =>
-        val tokens = line.split(":|\\s")
-        tokens(3).trim().toDouble
-      }.reduce[Double] { case (f1: Double, f2: Double) =>
-        f1 + f2
-      }
-      totalLines / lines.length
-    } else {
-      Double.NaN
-    }
-  }
-
-  def computeDownloadNodeAverage(rrdParser: RRDp, file: String, startTime: Long, endTime: Long): Double = {
-    val command = Array[String] (
-      "fetch", file, "AVERAGE",
-      "-s", (startTime / 1000).toString,
-      "-e", (endTime / 1000).toString
-    )
-    val rddResult = rrdParser.command(command)
-
-    // filtering unneeded + empty lines
-    val lines = rddResult.getOutput.trim().split("\n")
-      .filter { line =>
-        line.contains(":") && !line.contains("nan")
-      }
-    if (lines.length > 0) {
-      val totalLines = lines.map { line =>
-        val tokens = line.split(":|\\s")
-        tokens(2).trim().toDouble
-      }.reduce[Double] { case (f1: Double, f2: Double) =>
-        f1 + f2
-      }
-      totalLines / lines.length
-    } else {
-      Double.NaN
-    }
-  }
-
-  def plotStageGanttChart(runs: Seq[(AppData, mutable.Buffer[StageData], String)]): Unit = {
-    val jobFont = new Font("Dialog", Font.PLAIN, 40)
-    val jobBackgrounds = Array (
-      new Color(247,247,247),
-      new Color(99,99,99)
+    val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
+    val headers = Array (
+      "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime",
+      "InitialReadTime", "PartialOutputWaitTime", "FetchWaitTime", "ShuffleWriteTime",
+      "MemoryInput", "HadoopInput", "NetworkInput", "DiskInput"
     )
 
-    runs.foreach { case (appData, stages, outputPrefix) =>
-      val collection = new TaskSeriesCollection()
-      val markers = mutable.Buffer[IntervalMarker]()
-      val taskSeries = new TaskSeries("All stages")
-      var index = 0
-      stages.groupBy(_.jobId).toList.sortBy(_._1).foreach { case (jobId, jobStages) =>
-        val sortedStages = jobStages.sortBy(_.startTime)
-        var startTime = java.lang.Long.MAX_VALUE
-        var endTime = -1L
-        sortedStages.foreach { stage =>
-          if (startTime > stage.startTime) {
-            startTime = stage.startTime
-          }
-          if (endTime < stage.completionTime) {
-            endTime = stage.completionTime
-          }
-          val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
-          val initialReadFinished = stage.startTime + stage.initialReadTime / 24
-          val waitFinished = initialReadFinished + stage.partialOutputWaitTime / 24
-          val shuffleWriteStart = stage.completionTime - stage.shuffleWriteTime / 1000000 / 24
-          task.addSubtask(new Task("Initial read", new SimpleTimePeriod(stage.startTime, initialReadFinished)))
-          task.addSubtask(new Task("Wait for data", new SimpleTimePeriod(initialReadFinished, waitFinished)))
-          task.addSubtask(new Task("Execution", new SimpleTimePeriod(waitFinished, shuffleWriteStart)))
-          task.addSubtask(new Task("Shuffle write", new SimpleTimePeriod(shuffleWriteStart, stage.completionTime)))
-          taskSeries.add(task)
-        }
-        val jobMarker = new IntervalMarker(startTime, endTime)
-        jobMarker.setLabel(jobId.toString)
-        jobMarker.setAlpha(0.2f)
-        jobMarker.setLabelFont(jobFont)
-        jobMarker.setLabelAnchor(RectangleAnchor.TOP)
-        jobMarker.setLabelOffset(new RectangleInsets(20, 0, 0, 0))
-        jobMarker.setPaint(jobBackgrounds(index % jobBackgrounds.length))
-        index += 1
-        markers += jobMarker
-      }
-      collection.add(taskSeries)
-      val dateFormat = new RelativeDateFormat(appData.start)
-      val timeAxis = new DateAxis("Time")
-      timeAxis.setAutoRange(true)
-      timeAxis.setDateFormatOverride(dateFormat)
-      timeAxis.setMinimumDate(new Date(appData.start))
-      timeAxis.setMaximumDate(new Date(appData.end))
-      timeAxis.setLowerMargin(0.02)
-      timeAxis.setUpperMargin(0.02)
-
-      val categoryAxis = new CategoryAxis("Stages")
-
-      val renderer = new StageGanttRenderer
-      renderer.setBarPainter(new StandardBarPainter)
-      renderer.setDrawBarOutline(true)
-      renderer.setShadowVisible(false)
-      val plot = new CategoryPlot(collection, categoryAxis, timeAxis, renderer)
-      plot.setOrientation(PlotOrientation.HORIZONTAL)
-      markers.foreach { marker =>
-        plot.addRangeMarker(marker)
-      }
-      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, false)
-      val output = new File( s"$outputPrefix-stages.png" )
-      val width = 1280
-      val height = 960
-      ChartUtilities.saveChartAsPNG(output, chart, width, height)
-    }
-  }
-
-  def plotRuntimeDistribution(runs: Seq[(AppData, mutable.Buffer[StageData], String)], output: String): Unit = {
-    var variance: Double = 0
-    var totalRuntimes: Long = 0
-    var bestRuntime = Long.MaxValue
-    var worseRuntime = Long.MinValue
-    val appRuntimes = runs.map { case (appData, _, _) =>
-      totalRuntimes += appData.runtime
-      if (bestRuntime > appData.runtime) {
-        bestRuntime = appData.runtime
-      }
-      if (worseRuntime < appData.runtime) {
-        worseRuntime = appData.runtime
-      }
-      appData.runtime
-    }
-    val averageRuntime = totalRuntimes / appRuntimes.length
-
-    println(s"Average runtime: $averageRuntime")
-    println(s"Best runtime: $bestRuntime")
-    println(s"Worse runtime: $worseRuntime")
-
-    val dataset = new SimpleHistogramDataset("Runtime")
-    var binCount = 0
-    val binsize = 10
-    val averageInSecond = averageRuntime / 1000
-    while(averageInSecond - binsize * binCount > bestRuntime / 1000 ||
-      averageInSecond + binsize * binCount < worseRuntime / 1000 ) {
-      dataset.addBin(
-        new SimpleHistogramBin(
-          averageInSecond - binsize * (binCount + 1),
-          averageInSecond - binsize * binCount,
-          true,
-          false)
-      )
-      dataset.addBin(
-        new SimpleHistogramBin(
-          averageInSecond + binsize * binCount,
-          averageInSecond + binsize * (binCount + 1),
-          true,
-          false)
-      )
-      binCount += 1
-    }
-
-    appRuntimes.foreach { runtime =>
-      variance += Math.pow(runtime - averageRuntime, 2)
-      dataset.addObservation(runtime / 1000)
-    }
-    val standardDeviation = Math.round(Math.sqrt(variance))
-
-    dataset.setAdjustForBinSize(false)
-    val chart = ChartFactory.createHistogram(
-      "Execution time graph",
-      "Execution Time",
-      "Count",
-      dataset,
-      PlotOrientation.VERTICAL,
-      false,
-      false,
-      false
+    val sizeFormatter = new FmtNumber("#,### MB")
+    val writeProcessors = Array[CellProcessor] (
+      new NotNull(),
+      new NotNull(),
+      new NotNull(),
+      new NotNull(),
+      new NotNull(),
+      new NotNull(),
+      new NotNull(),
+      new NotNull(),
+      new NotNull(),
+      sizeFormatter,
+      sizeFormatter,
+      sizeFormatter,
+      sizeFormatter
     )
-
-    val plot = chart.getXYPlot
-    plot.setBackgroundPaint(Color.white)
-    plot.setDomainGridlinePaint(Color.lightGray)
-    plot.setRangeGridlinePaint(Color.lightGray)
-    val yAxis = plot.getRangeAxis
-    yAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits())
-    val xAxis = plot.getDomainAxis
-    xAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits())
-
-    val renderer = plot.getRenderer.asInstanceOf[XYBarRenderer]
-    renderer.setDrawBarOutline(true)
-    renderer.setBarPainter(new StandardXYBarPainter())
-    renderer.setShadowVisible(false)
-
-    chart.addSubtitle(new TextTitle(s"Average time: $averageInSecond s"))
-    chart.addSubtitle(new TextTitle(s"Standard deviation: ${standardDeviation / 1000} s"))
-    chart.addSubtitle(new TextTitle(s"Best time: ${bestRuntime / 1000} s"))
-    chart.addSubtitle(new TextTitle(s"Worse time: ${worseRuntime / 1000} s"))
-    val width = 1280
-    val height = 960
-
-    ChartUtilities.saveChartAsPNG(new File(output), chart, width, height)
+    try {
+      writer.writeHeader(headers:_*)
+      average.foreach { stage =>
+        writer.write(stage, headers, writeProcessors)
+      }
+    } finally {
+      writer.close()
+    }
   }
 
-  def plotCpuGraphPerRun(
-      rrdParser: RRDp,
-      files: Array[File],
-      outputPrefix: String,
-      startTime: Long,
-      endTime: Long,
-      stagesDuration: Seq[(Int, Long, Long)],
-      average: Boolean): Unit = {
-
-    val points = files.flatMap { file =>
-      val command = Array[String] (
-        "fetch", file.getPath, "AVERAGE",
-        "-s", (startTime / 1000).toString,
-        "-e", (endTime / 1000).toString
-      )
-      val rddResult = rrdParser.command(command)
-      rddResult.getOutput.trim().split("\n")
-        .filter { line =>
-          line.contains(":") && !line.contains("nan")
-        }
-        .map { line =>
-          val tokens = line.split(":")
-          val idle = tokens(1).trim().toDouble
-          val time = tokens(0).toLong
-          (time * 1000, 100 - idle, file.getParentFile.getParentFile.getName)
-        }
-    }
-    .groupBy(t => t._1)
-
-    val datasets = new ArrayBuffer[TimeSeriesCollection]()
-    val seriesMap = new scala.collection.mutable.HashMap[String, TimeSeries]
-    points.foreach { case (time: Long, machines: Array[(Long, Double, String)]) =>
-      var cpuTotal = 0.0
-      machines.foreach { case (_, cpu, machine) =>
-        cpuTotal += cpu
-        seriesMap.getOrElseUpdate(machine, new TimeSeries(machine)).add(new Second(new Date(time)), cpu)
-      }
-      if (average) {
-        seriesMap.getOrElseUpdate("Average CPU", new TimeSeries("Average CPU"))
-          .add(new Second(new Date(time)), cpuTotal / machines.length)
-      }
-    }
-    seriesMap.foreach { case (_, series) =>
-      datasets += new TimeSeriesCollection(series)
-    }
-
-    val output = new File( s"$outputPrefix-cpu.png" )
-    drawChart(output, stagesDuration, datasets.toArray, "CPU", "Time", "Usage (%)", startTime, endTime)
-  }
-
-  def plotNetworkGraphPerRun(
-      rrdParser: RRDp,
-      files: Array[File],
-      outputPrefix: String,
-      startTime: Long,
-      endTime: Long,
-      stagesDuration: Seq[(Int, Long, Long)],
-      average: Boolean): Unit = {
-    val points = files.flatMap { file =>
-      val command = Array[String] (
-        "fetch", file.getPath, "AVERAGE",
-        "-s", (startTime / 1000).toString,
-        "-e", (endTime / 1000).toString
-      )
-      val rddResult = rrdParser.command(command)
-      rddResult.getOutput.trim().split("\n")
-        .filter { line =>
-          line.contains(":") && !line.contains("nan")
-        }
-        .map { line =>
-          val tokens = line.split(":|\\s")
-          val download = tokens(2).trim().toDouble
-          val upload = tokens(3).trim().toDouble
-          val time = tokens(0).toLong
-          (time * 1000, upload, download, file.getParentFile.getParentFile.getName)
-        }
-    }
-    .groupBy(t => t._1)
-
-    val datasets = new ArrayBuffer[TimeSeriesCollection]()
-    val seriesMap = new scala.collection.mutable.HashMap[String, (TimeSeries, TimeSeries)]
-    points.foreach { case (time: Long, machines: Array[(Long, Double, Double, String)]) =>
-      var downloadTotal = 0.0
-      var uploadTotal = 0.0
-      machines.foreach { case (_, upload, download, machine) =>
-        uploadTotal += upload
-        downloadTotal += download
-        val uploadDownload =
-          seriesMap.getOrElseUpdate(
-            s"$machine",
-            (new TimeSeries(s"$machine-Upload"), new TimeSeries(s"$machine-Download"))
-          )
-        uploadDownload._1.add(new Second(new Date(time)), upload)
-        uploadDownload._2.add(new Second(new Date(time)), download)
-      }
-      if (average) {
-        val uploadDownload =
-          seriesMap.getOrElseUpdate(
-            "Average download",
-            (new TimeSeries("Average upload"), new TimeSeries("Average download"))
-          )
-        uploadDownload._1.add(new Second(new Date(time)), uploadTotal / machines.length)
-        uploadDownload._2.add(new Second(new Date(time)), downloadTotal / machines.length)
-      }
-    }
-    seriesMap.foreach { case (_, (uploadSeries, downloadSeries)) =>
-      val dataset = new TimeSeriesCollection
-      dataset.addSeries(uploadSeries)
-      dataset.addSeries(downloadSeries)
-      datasets += dataset
-    }
-
-    val output = new File( s"$outputPrefix-network.png" )
-    drawChart(output, stagesDuration, datasets.toArray, "Network", "Time", "Bandwidth (bytes/s)", startTime, endTime)
-  }
-
-  def plotDiskGraphPerRun(
-      rrdParser: RRDp,
-      files: Array[File],
-      outputPrefix: String,
-      startTime: Long,
-      endTime: Long,
-      stagesDuration: Seq[(Int, Long, Long)],
-      average: Boolean) {
-    val points = files.flatMap { file =>
-      val command = Array[String] (
-        "fetch", file.getPath, "AVERAGE",
-        "-s", (startTime / 1000).toString,
-        "-e", (endTime / 1000).toString
-      )
-      val rddResult = rrdParser.command(command)
-      rddResult.getOutput.trim().split("\n")
-        .filter { line =>
-          line.contains(":") && !line.contains("nan")
-        }
-        .map { line =>
-          val tokens = line.split(":|\\s")
-          val ioTime = tokens(2).trim().toDouble
-          val weightedIoTime = tokens(3).trim().toDouble
-          val time = tokens(0).toLong
-          (time * 1000, ioTime, weightedIoTime, file.getParentFile.getParentFile.getName, file.getParentFile.getName)
-        }
-    }
-    .groupBy(t => t._1)
-
-    val datasets = new ArrayBuffer[TimeSeriesCollection]()
-    val seriesMap = new scala.collection.mutable.HashMap[(String, String), TimeSeries]
-
-    points.foreach { case (time, machineDisks) =>
-      val ioTimeTotal = new mutable.HashMap[String, Double]()
-      machineDisks.foreach { case (_, ioTime, weightedIoTime, machine, disk) =>
-        ioTimeTotal += disk -> (ioTime + ioTimeTotal.getOrElse(disk, 0.0))
-        seriesMap.getOrElseUpdate((machine, disk), new TimeSeries(s"$machine-$disk-IoTime"))
-          .add(new Second(new Date(time)), ioTime)
-//          seriesMap.getOrElseUpdate(s"$machine-WeightedIoTime", new TimeSeries(s"$machine-WeightedIoTime"))
-//            .add(new Second(new Date(time)), weightedIoTime)
-      }
-      if (average) {
-        machineDisks.groupBy(_._5).foreach { case (disk, machines) =>
-          seriesMap.getOrElseUpdate(("Average", disk), new TimeSeries(s"Average IO Time - $disk"))
-            .add(new Second(new Date(time)), ioTimeTotal(disk) / machines.length)
-          //          val totalWeightedIoTime = machines.map(_._3).sum
-          //          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
-          //          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
-        }
-      }
-    }
-
-    seriesMap.groupBy(_._1._1).foreach { case (machine, map) =>
-      val dataset = new TimeSeriesCollection()
-      map.foreach { case ((_, disk), series) =>
-        dataset.addSeries(series)
-      }
-      datasets += dataset
-    }
-
-    val output = new File( s"$outputPrefix-disk.png" )
-    drawChart(output, stagesDuration, datasets.toArray, "Disk", "Time", "IO Time (ms)", startTime, endTime)
-  }
-
-  def drawChart(
-      output: File,
-      stagesDuration: Seq[(Int, Long, Long)],
-      datasets: Array[TimeSeriesCollection],
-      title: String,
-      timeAxisLabel: String,
-      valueAxisLabel: String,
-      startTime: Long,
-      endTime: Long): Unit = {
-    val width = 1280
-    val height = 960
-
-    val dateFormat = new RelativeDateFormat(startTime)
-    val timeAxis = new DateAxis(timeAxisLabel)
-    timeAxis.setAutoRange(true)
-    timeAxis.setDateFormatOverride(dateFormat)
-    timeAxis.setMinimumDate(new Date(startTime))
-    timeAxis.setMaximumDate(new Date(endTime))
-    timeAxis.setLowerMargin(0.02)
-    timeAxis.setUpperMargin(0.02)
-
-
-    val valueAxis = new NumberAxis(valueAxisLabel)
-    valueAxis.setAutoRangeIncludesZero(false)
-
-    val combinedPlot = new CombinedDomainXYPlot(timeAxis)
-    combinedPlot.setOrientation(PlotOrientation.VERTICAL)
-
-    datasets.sortBy { tsc =>
-      tsc.getSeries(0).getKey.asInstanceOf[String]
-    }
-    .foreach { dataset =>
-      val plot = new XYPlot(dataset, timeAxis, valueAxis, new StandardXYItemRenderer)
-      stagesDuration.sortBy(_._2).zipWithIndex.foreach { case ((id, start, end), index) =>
-        val intervalMarker = new IntervalMarker(start, end)
-        intervalMarker.setLabel(id.toString)
-        intervalMarker.setAlpha(0.2f)
-        intervalMarker.setLabelFont(labelFont)
-        intervalMarker.setPaint(colors(index % colors.length))
-        if (index % 2 == 0) {
-          intervalMarker.setLabelOffset(new RectangleInsets(15, 0, 0, 0))
-        } else {
-          intervalMarker.setLabelOffset(new RectangleInsets(50, 0, 0, 0))
-        }
-        plot.addDomainMarker(intervalMarker)
-      }
-      combinedPlot.add(plot)
-    }
-    val chart = new JFreeChart(title, JFreeChart.DEFAULT_TITLE_FONT, combinedPlot, true)
-    ChartUtilities.saveChartAsPNG(output, chart, width, height)
-
-    //    val svg = new SVGGraphics2D(width, height)
-    //    chartFactory.draw(svg, new Rectangle(0, 0, width, height))
-    //    SVGUtils.writeToSVG(lineChart, svg.getSVGElement())
-
-  }
 }
