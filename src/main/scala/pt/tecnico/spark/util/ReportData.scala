@@ -108,4 +108,8 @@ case class TaskData (
     shuffleWriteTime: Long,
     inputBytesRead: Long,
     inputSource: ReadMethod.Value,
-    duration: Long)
+    duration: Long,
+    executor: String,
+    host: String,
+    waitForParentPeriods: Array[(Long, Long)]
+)

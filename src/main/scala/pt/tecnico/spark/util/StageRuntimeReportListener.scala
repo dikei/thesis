@@ -121,11 +121,15 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
 
     // Store the tasks data inside stage data
     stageTaskInfoMetrics.foreach { case (taskInfo, taskMetric) =>
-      val (_fetchWaitTime, _partialOutputWaitTime, _initialReadTime): (Long, Long, Long) =
+      val (_fetchWaitTime, _partialOutputWaitTime, _initialReadTime, _waitForParentPeriods):
+        (Long, Long, Long, Array[(Long, Long)]) =
         taskMetric.shuffleReadMetrics match {
           case Some(metric) =>
-            (metric.fetchWaitTime, metric.waitForPartialOutputTime, metric.initialReadTime)
-          case _ => (0, 0, 0)
+            (metric.fetchWaitTime,
+              metric.waitForPartialOutputTime,
+              metric.initialReadTime,
+              metric.waitForParentPeriods.toArray)
+          case _ => (0, 0, 0, Array[(Long, Long)]())
         }
       val _shuffleWriteTime: Long = taskMetric.shuffleWriteMetrics match {
         case Some(metric) =>
@@ -153,7 +157,10 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
         waitForPartialOutputTime = _partialOutputWaitTime,
         inputBytesRead = _inputBytesRead,
         inputSource = _inputSource,
-        duration = taskInfo.duration
+        duration = taskInfo.duration,
+        executor = taskInfo.executorId,
+        host = taskInfo.host,
+        waitForParentPeriods = _waitForParentPeriods
       )
     }
     stageData.tasks = taskData.toArray[TaskData]
