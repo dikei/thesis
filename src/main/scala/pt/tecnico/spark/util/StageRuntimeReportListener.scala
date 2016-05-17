@@ -157,9 +157,10 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
         waitForPartialOutputTime = _partialOutputWaitTime,
         inputBytesRead = _inputBytesRead,
         inputSource = _inputSource,
-        duration = taskInfo.duration,
         executor = taskInfo.executorId,
         host = taskInfo.host,
+        startTime = taskInfo.launchTime,
+        endTime = taskInfo.finishTime,
         waitForParentPeriods = _waitForParentPeriods
       )
     }
