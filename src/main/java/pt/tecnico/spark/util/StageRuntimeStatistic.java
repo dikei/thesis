@@ -28,6 +28,10 @@ public class StageRuntimeStatistic {
     private Double download;
     private Long partialOutputWaitTime;
     private Long initialReadTime;
+    private Long memoryInput;
+    private Long hadoopInput;
+    private Long networkInput;
+    private Long diskInput;
 
     public StageRuntimeStatistic() {
     }
@@ -53,7 +57,11 @@ public class StageRuntimeStatistic {
                                  Double upload,
                                  Double download,
                                  Long partialOutputWaitTime,
-                                 Long initialReadTime) {
+                                 Long initialReadTime,
+                                 Long memoryInput,
+                                 Long hadoopInput,
+                                 Long networkInput,
+                                 Long diskInput) {
         this.stageId = stageId;
         this.average = average;
         this.fastest = fastest;
@@ -76,6 +84,42 @@ public class StageRuntimeStatistic {
         this.download = download;
         this.partialOutputWaitTime = partialOutputWaitTime;
         this.initialReadTime = initialReadTime;
+        this.memoryInput = memoryInput;
+        this.hadoopInput = hadoopInput;
+        this.networkInput = networkInput;
+        this.diskInput = diskInput;
+    }
+
+    public Long getMemoryInput() {
+        return memoryInput;
+    }
+
+    public void setMemoryInput(Long memoryInput) {
+        this.memoryInput = memoryInput;
+    }
+
+    public Long getHadoopInput() {
+        return hadoopInput;
+    }
+
+    public void setHadoopInput(Long hadoopInput) {
+        this.hadoopInput = hadoopInput;
+    }
+
+    public Long getNetworkInput() {
+        return networkInput;
+    }
+
+    public void setNetworkInput(Long networkInput) {
+        this.networkInput = networkInput;
+    }
+
+    public Long getDiskInput() {
+        return diskInput;
+    }
+
+    public void setDiskInput(Long diskInput) {
+        this.diskInput = diskInput;
     }
 
     public Long getInitialReadTime() {

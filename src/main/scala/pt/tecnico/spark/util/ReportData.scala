@@ -1,5 +1,7 @@
 package pt.tecnico.spark.util
 
+import scala.collection.mutable
+
 /**
   * Created by dikei on 4/29/16.
   */
@@ -91,6 +93,18 @@ case class StageData(
     val _percent95 = sortedDurations((sortedDurations.length * 0.95).toInt)
     (_totalTaskRuntime, _fastest, _slowest, _average, _standardDeviation,
       _percent5, _percent25, _median, _percent75, _percent95)
+  }
+
+  lazy val (memoryInput, hadoopInput, diskInput, networkInput) = processTasksInput
+
+  private def processTasksInput: (Long, Long, Long, Long) = {
+    val acc = mutable.HashMap[ReadMethod.Value, Long]()
+    tasks.foreach { taskData =>
+      acc += taskData.inputSource -> (acc.getOrElse(taskData.inputSource, 0L) + taskData.inputBytesRead)
+    }
+    (acc.getOrElse(ReadMethod.Memory, 0L),
+      acc.getOrElse(ReadMethod.Hadoop, 0L), acc.getOrElse(ReadMethod.Disk, 0L),
+      acc.getOrElse(ReadMethod.Network, 0L))
   }
 }
 

@@ -93,11 +93,12 @@ object StageRuntimeAnalyzer {
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
       "StageId", "Name", "TaskCount", "StageRuntime", "TotalTaskRuntime",
-      "InitialReadTime", "PartialOutputWaitTime", "FetchWaitTime", "ShuffleWriteTime"
+      "InitialReadTime", "PartialOutputWaitTime", "FetchWaitTime", "ShuffleWriteTime",
+      "MemoryInput", "HadoopInput", "NetworkInput", "DiskInput"
     )
 
     val numberFormater = new FmtNumber(".##")
-    val networkFormatter = new FmtNumber("#,###")
+    val sizeFormatter = new FmtNumber("#,### MB")
     val writeProcessors = Array[CellProcessor] (
       new NotNull(),
       new NotNull(),
@@ -107,7 +108,11 @@ object StageRuntimeAnalyzer {
       new NotNull(),
       new NotNull(),
       new NotNull(),
-      new NotNull()
+      new NotNull(),
+      sizeFormatter,
+      sizeFormatter,
+      sizeFormatter,
+      sizeFormatter
     )
     try {
       writer.writeHeader(headers:_*)
@@ -221,8 +226,11 @@ object StageRuntimeAnalyzer {
             upload,
             download,
             stageData.partialOutputWaitTime,
-            stageData.initialReadTime
-          )
+            stageData.initialReadTime,
+            stageData.memoryInput,
+            stageData.hadoopInput,
+            stageData.networkInput,
+            stageData.diskInput)
         }.filter { s =>
           !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
         }
@@ -250,7 +258,11 @@ object StageRuntimeAnalyzer {
             s1.getUpload + s2.getUpload,
             s1.getDownload + s2.getDownload,
             s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime,
-            s1.getInitialReadTime + s2.getInitialReadTime
+            s1.getInitialReadTime + s2.getInitialReadTime,
+            s1.getMemoryInput + s2.getMemoryInput,
+            s1.getHadoopInput + s2.getHadoopInput,
+            s1.getNetworkInput + s2.getNetworkInput,
+            s1.getDiskInput + s2.getDiskInput
           )
         }
         val count = validRuns.length
@@ -276,7 +288,11 @@ object StageRuntimeAnalyzer {
           total.getUpload / count,
           total.getDownload / count,
           total.getPartialOutputWaitTime / count / 1000,
-          total.getInitialReadTime / count / 1000
+          total.getInitialReadTime / count / 1000,
+          total.getMemoryInput / count / 1000000,
+          total.getHadoopInput / count / 1000000,
+          total.getNetworkInput / count / 1000000,
+          total.getDiskInput / count / 1000000
         )
       }.toArray.sortBy(_.getStageId)
 
