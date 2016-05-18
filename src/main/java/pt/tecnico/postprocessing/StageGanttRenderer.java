@@ -1,12 +1,15 @@
 package pt.tecnico.postprocessing;
 
 import org.jfree.chart.renderer.category.GanttRenderer;
+import org.jfree.data.gantt.Task;
+import org.jfree.data.gantt.TaskSeriesCollection;
 
 import java.awt.*;
+import java.util.List;
 
 class StageGanttRenderer extends GanttRenderer {
 
-    private static final int PASS = 1; // 1 for normal draw, 2 for shadow
+    private final TaskSeriesCollection collection;
     private int row;
     private int col;
     private int index;
@@ -17,7 +20,8 @@ class StageGanttRenderer extends GanttRenderer {
             new Color(152,78,163)
     };
 
-    public StageGanttRenderer() {
+    public StageGanttRenderer(TaskSeriesCollection collection) {
+        this.collection = collection;
     }
 
     @Override
@@ -27,7 +31,31 @@ class StageGanttRenderer extends GanttRenderer {
             this.col = col;
             index = 0;
         }
-        int clutIndex = index++ / PASS;
-        return pallete[clutIndex];
+        if (index > 0) {
+            // Sub task will be draw with index > 0
+            String series = (String) collection.getSeriesKey(row);
+            if (col < collection.getSeries(series).getItemCount()) {
+                Task t = (Task) collection.getSeries(series).getTasks().get(col);
+                if (index - 1 < t.getSubtaskCount()) {
+                    String subTaskName = t.getSubtask(index - 1).getDescription();
+                    if (subTaskName.startsWith("Wait")) {
+                        index++;
+                        return Color.BLACK;
+                    }
+                } else {
+                    System.out.println("Unexpected index: " + index);
+                }
+            } else {
+                System.out.printf("Unexpected row: %s col: %d %n", series, col);
+                List<Task> tasks = collection.getSeries(series).getTasks();
+                for(Task t: tasks) {
+                    System.out.println(t.getDescription());
+                }
+                index++;
+                return Color.LIGHT_GRAY;
+            }
+        }
+        index++;
+        return super.getItemPaint(row, col);
     }
 }

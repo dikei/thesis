@@ -113,6 +113,8 @@ object ReadMethod extends Enumeration with Serializable {
   val None, Memory, Disk, Hadoop, Network = Value
 }
 
+case class WaitPeriod (start: Long, duration: Long)
+
 case class TaskData (
     id: String,
     index: Int,
@@ -126,7 +128,7 @@ case class TaskData (
     host: String,
     startTime: Long,
     endTime: Long,
-    waitForParentPeriods: Array[(Long, Long)]) {
+    waitForParentPeriods: Array[WaitPeriod]) {
 
   lazy val duration: Long = endTime - startTime
 }

@@ -15,7 +15,7 @@ import org.jfree.chart.title.TextTitle
 import org.jfree.chart.util.RelativeDateFormat
 import org.jfree.chart.{ChartFactory, ChartUtilities, JFreeChart}
 import org.jfree.data.function.NormalDistributionFunction2D
-import org.jfree.data.gantt.{Task, TaskSeries, TaskSeriesCollection}
+import org.jfree.data.gantt.{Task, TaskSeries, TaskSeriesCollection, XYTaskDataset}
 import org.jfree.data.general.DatasetUtilities
 import org.jfree.data.statistics.{SimpleHistogramBin, SimpleHistogramDataset}
 import org.jfree.data.time.{Second, SimpleTimePeriod, TimeSeries, TimeSeriesCollection}
@@ -33,6 +33,7 @@ import pt.tecnico.spark.util.{AppData, ReadMethod, StageData, StageRuntimeStatis
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.io.Source
+import scala.collection.JavaConverters._
 
 /**
   * Created by dikei on 3/15/16.
@@ -90,13 +91,16 @@ object StageRuntimeAnalyzer {
     data.foreach { case (appData, stages, outputPrefix) =>
       val collection = new TaskSeriesCollection()
       val markers = mutable.Buffer[IntervalMarker]()
-      val taskSeries = new TaskSeries("All stages")
+      val stageSeries = new TaskSeries("Stages")
+      val executorSeries = mutable.HashMap[String, TaskSeries]()
       var index = 0
+      var stageProcessed = 0
       stages.groupBy(_.jobId).toList.sortBy(_._1).foreach { case (jobId, jobStages) =>
         val sortedStages = jobStages.sortBy(_.startTime)
         var startTime = java.lang.Long.MAX_VALUE
         var endTime = -1L
         sortedStages.foreach { stage =>
+          stageProcessed += 1
           if (startTime > stage.startTime) {
             startTime = stage.startTime
           }
@@ -104,14 +108,36 @@ object StageRuntimeAnalyzer {
             endTime = stage.completionTime
           }
           val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
-          val initialReadFinished = stage.startTime + stage.initialReadTime / 24
-          val waitFinished = initialReadFinished + stage.partialOutputWaitTime / 24
-          val shuffleWriteStart = stage.completionTime - stage.shuffleWriteTime / 1000000 / 24
-          task.addSubtask(new Task("Initial read", new SimpleTimePeriod(stage.startTime, initialReadFinished)))
-          task.addSubtask(new Task("Wait for data", new SimpleTimePeriod(initialReadFinished, waitFinished)))
-          task.addSubtask(new Task("Execution", new SimpleTimePeriod(waitFinished, shuffleWriteStart)))
-          task.addSubtask(new Task("Shuffle write", new SimpleTimePeriod(shuffleWriteStart, stage.completionTime)))
-          taskSeries.add(task)
+          stageSeries.add(task)
+
+          stage.tasks.groupBy(_.host).foreach { case (host, tasks) =>
+            val executorStart = tasks.map(_.startTime).min
+            val executorEnd = tasks.map(_.endTime).max
+            val executorRunPeriod = new SimpleTimePeriod(executorStart, executorEnd)
+            val executorRun = new Task(stage.stageId.toString, executorRunPeriod)
+
+            executorSeries.getOrElseUpdate(host, new TaskSeries(host)).add(executorRun)
+
+            val waitPeriods = tasks.flatMap(_.waitForParentPeriods)
+            if (waitPeriods.nonEmpty) {
+              // Jfreechart doesn't draw properly if the subtask do not filled the parent task
+              // Add this as a workaround
+              executorRun.addSubtask(new Task(s"Execute-${stage.stageId}-$host", executorRunPeriod))
+              waitPeriods.zipWithIndex.foreach { case (waitPeriod, i) =>
+                val wait = new Task(
+                  s"Wait-${stage.stageId}-$host-$i",
+                  new SimpleTimePeriod(waitPeriod.start, waitPeriod.start + waitPeriod.duration)
+                )
+                executorRun.addSubtask(wait)
+              }
+            }
+          }
+          executorSeries.values.foreach { executor =>
+            if (executor.getItemCount < stageProcessed) {
+                // This executor doesn't run any task in this stage
+                executor.add(new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.startTime)))
+            }
+          }
         }
         val jobMarker = new IntervalMarker(startTime, endTime)
         jobMarker.setLabel(jobId.toString)
@@ -123,7 +149,8 @@ object StageRuntimeAnalyzer {
         index += 1
         markers += jobMarker
       }
-      collection.add(taskSeries)
+      collection.add(stageSeries)
+      executorSeries.values.foreach(collection.add)
       val dateFormat = new RelativeDateFormat(appData.start)
       val timeAxis = new DateAxis("Time")
       timeAxis.setAutoRange(true)
@@ -135,18 +162,19 @@ object StageRuntimeAnalyzer {
 
       val categoryAxis = new CategoryAxis("Stages")
 
-      val renderer = new StageGanttRenderer
+      val renderer = new StageGanttRenderer(collection)
       renderer.setBarPainter(new StandardBarPainter)
-      renderer.setDrawBarOutline(true)
+      renderer.setDrawBarOutline(false)
       renderer.setShadowVisible(false)
       val plot = new CategoryPlot(collection, categoryAxis, timeAxis, renderer)
       plot.setOrientation(PlotOrientation.HORIZONTAL)
+      plot.getDomainAxis.setCategoryMargin(0.3)
       markers.foreach { marker =>
         plot.addRangeMarker(marker)
       }
-      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, false)
+      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
       val output = new File( s"$outputPrefix-stages.png" )
-      val width = 1280
+      val width = 1280 * 2
       val height = 960
       ChartUtilities.saveChartAsPNG(output, chart, width, height)
     }

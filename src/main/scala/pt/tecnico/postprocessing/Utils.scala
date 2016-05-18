@@ -14,7 +14,7 @@ import org.jfree.chart.renderer.xy.StandardXYItemRenderer
 import org.jfree.chart.util.RelativeDateFormat
 import org.jfree.data.time.TimeSeriesCollection
 import org.jfree.ui.RectangleInsets
-import org.json4s.DefaultFormats
+import org.json4s.{DefaultFormats, ShortTypeHints}
 import org.json4s.native.JsonMethods._
 import pt.tecnico.spark.util.{AppData, ReadMethod, StageData}
 
