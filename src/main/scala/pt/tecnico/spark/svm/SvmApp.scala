@@ -14,20 +14,21 @@ object SvmApp {
   def main(args: Array[String]): Unit = {
     if (args.length < 2) {
       println("Usage: ")
-      println("spark-submit --class pt.tecnico.spark.svm.SvmApp [jar] [input] [output] [#iterations] [statsDir]")
+      println("spark-submit --class pt.tecnico.spark.svm.SvmApp [jar] [input] [output] [#iterations] [#noPartition] [statsDir]")
       System.exit(0)
     }
 
     val input = args(0)
     val output = args(1)
     val noIteration = if (args.length > 2) args(2).toInt else 100
-    val statsDir = if (args.length > 3) args(3) else "stats"
+    val noPartition = if (args.length > 3) args(3).toInt else -1
+    val statsDir = if (args.length > 4) args(4) else "stats"
     val conf = new SparkConf().setAppName("SvmApp")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val data = MLUtils.loadLabeledPoints(sc, input)
+    val data = MLUtils.loadLabeledPoints(sc, input, noPartition)
     val splits = data.randomSplit(Array(0.6, 0.4), 13290)
 
     val training = splits(0)
@@ -41,16 +42,10 @@ object SvmApp {
       (point.label, prediction)
     }
 
-    // Cache the result
-    predictionResult.cache()
-
-    // Save the result
-    predictionResult.saveAsTextFile(output)
-
-    // Print analytics of the result
-
-    val metrics = new MulticlassMetrics(predictionResult)
-    println("Precision = " + metrics.precision)
-    println("Recall = " + metrics.recall)
+    if (output.isEmpty) {
+      predictionResult.foreachPartition(x => {})
+    } else {
+      predictionResult.saveAsTextFile(output)
+    }
   }
 }
