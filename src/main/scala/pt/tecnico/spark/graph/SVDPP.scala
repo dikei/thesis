@@ -15,12 +15,12 @@ object SVDPP {
     if (args.length < 9) {
       println("Usage: ")
       println("spark-submit --class pt.tecnico.spark.graph.SVDPP " +
-        "[jar] [input] [output] [rank] [#iteration] [minVal] [maxVal] [gamma1] [gamma2] [gamma6] [gamma7] [statsDir]")
+        "[jar] [input] [#partition] [rank] [#iteration] [minVal] [maxVal] [gamma1] [gamma2] [gamma6] [gamma7] [statsDir]")
       System.exit(0)
     }
 
     val input = args(0)
-    val output = args(1)
+    val noPartition = args(1).toInt
     val rank = args(2).toInt
     val iteration = args(3).toInt
     val minVal = args(4).toDouble
@@ -36,7 +36,7 @@ object SVDPP {
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val graph = GraphLoader.edgeListFile(sc, input)
+    val graph = GraphLoader.edgeListFile(sc, input, numEdgePartitions = noPartition)
     val edges = graph.edges.map( e => new Edge(e.srcId, e.dstId, e.attr.toDouble))
 
     val svdconf = new Conf(rank, iteration, minVal, maxVal, gamma1, gamma2, gamma6, gamma7)
