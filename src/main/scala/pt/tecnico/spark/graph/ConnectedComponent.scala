@@ -23,6 +23,7 @@ object ConnectedComponent {
     val statsDir = if (args.length > 3) args(3) else "stats"
     val conf = new SparkConf().setAppName("ConnectedComponent")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     val sc = new SparkContext(conf)
 
     val listener = new StageRuntimeReportListener(statsDir)

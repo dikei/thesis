@@ -30,6 +30,8 @@ object MatrixGen {
 
     val conf = new SparkConf().setAppName("MFDataGenerator")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+
     val sc = new SparkContext(conf)
 
     val random = new java.util.Random(42L)

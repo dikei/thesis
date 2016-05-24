@@ -25,6 +25,8 @@ object SvmApp {
     val statsDir = if (args.length > 4) args(4) else "stats"
     val conf = new SparkConf().setAppName("SvmApp")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 

@@ -24,6 +24,7 @@ object LogisticGen {
 
     val conf = new SparkConf().setAppName("LogisticRegressionDataGenerator")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 
     val sc = new SparkContext(conf)
 

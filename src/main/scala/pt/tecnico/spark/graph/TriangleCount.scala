@@ -18,7 +18,7 @@ object TriangleCount {
 
     val conf = new SparkConf().setAppName("TriangleCount")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
-//    conf.set("spark.scheduler.removeStageBarrier", "true")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))

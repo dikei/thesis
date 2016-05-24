@@ -50,7 +50,7 @@ object PageRankSimple {
 
     val sparkConf = new SparkConf().setAppName("PageRankSimple")
     sparkConf.set("spark.hadoop.validateOutputSpecs", "false")
-//    sparkConf.set("spark.scheduler.removeStageBarrier", "true")
+    sparkConf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 
     val ctx = new SparkContext(sparkConf)
     ctx.addSparkListener(new StageRuntimeReportListener(statsDir))

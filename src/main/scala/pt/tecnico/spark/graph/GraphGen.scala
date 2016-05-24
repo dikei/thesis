@@ -23,6 +23,7 @@ object GraphGen {
     val noPartition = if (args.length > 3) args(3).toInt else 0
     val conf = new SparkConf().setAppName("GraphGen")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
     val sc = new SparkContext(conf)
 
     val graph = GraphGenerators

@@ -10,6 +10,7 @@ object TopKCount {
   def main(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("TopKCount")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 
     val inputFile = args(0)
     val statsDir = if (args.length > 1) args(1) else "stats"

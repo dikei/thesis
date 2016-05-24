@@ -44,6 +44,8 @@ object TeraGen {
 
     val conf = new SparkConf()
       .setAppName(s"TeraGen ($size)")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+
     val sc = new SparkContext(conf)
 
     val parts = args(2).toInt

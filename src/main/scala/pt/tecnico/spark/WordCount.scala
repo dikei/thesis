@@ -1,6 +1,6 @@
 package pt.tecnico.spark
 
-import org.apache.spark.{HashPartitioner, SparkConf, SparkContext}
+import org.apache.spark.{HashPartitioner, Partitioner, SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
 /**
@@ -11,7 +11,7 @@ object WordCount {
   def main(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("WordCount")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
-//    conf.set("spark.scheduler.removeStageBarrier", "true")
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 
     val sc = new SparkContext(conf)
 
