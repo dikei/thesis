@@ -9,9 +9,9 @@ scalacOptions += "-target:jvm-1.7"
 
 libraryDependencies ++= Seq(
   "com.google.guava" % "guava" % "19.0",
-  "org.apache.spark" % "spark-core_2.10" % "1.6.1-SNAPSHOT" % "provided",
-  "org.apache.spark" % "spark-mllib_2.10" % "1.6.1-SNAPSHOT" % "provided",
-  "org.apache.spark" % "spark-graphx_2.10" % "1.6.1-SNAPSHOT" % "provided",
+  "org.apache.spark" % "spark-core_2.10" % "1.6.2-SNAPSHOT" % "provided",
+  "org.apache.spark" % "spark-mllib_2.10" % "1.6.2-SNAPSHOT" % "provided",
+  "org.apache.spark" % "spark-graphx_2.10" % "1.6.2-SNAPSHOT" % "provided",
   "net.sf.supercsv" % "super-csv" % "2.4.0",
   "org.jfree" % "jfreechart" % "1.0.19",
   "com.google.guava" % "guava" % "19.0",
