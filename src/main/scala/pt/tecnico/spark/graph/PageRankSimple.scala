@@ -20,7 +20,8 @@ Copy from org.apache.spark.examples.SparkPageRank
  */
 package pt.tecnico.spark.graph
 
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.{Partitioner, SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
 /**
@@ -46,7 +47,8 @@ object PageRankSimple {
     val input = args(0)
     val output = args(1)
     val iters = if (args.length > 2) args(2).toInt else 10
-    val statsDir = if (args.length > 3) args(3) else "stats"
+    val numPartitions = args(3).toInt
+    val statsDir = if (args.length > 4) args(4) else "stats"
 
     val sparkConf = new SparkConf().setAppName("PageRankSimple")
     sparkConf.set("spark.hadoop.validateOutputSpecs", "false")
@@ -55,11 +57,21 @@ object PageRankSimple {
     val ctx = new SparkContext(sparkConf)
     ctx.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val lines = ctx.textFile(input, 1)
-    val links = lines.map{ s =>
-      val parts = s.split("\\s+")
-      (parts(0), parts(1))
-    }.distinct().groupByKey().cache()
+    // Do the word count and save output
+    val createCombiner = (v: Double) => v
+    val mergeValue = (a: Double, b: Double) => a + b
+    val mergeCombiners = (a: Double, b: Double) => {
+      a + b
+    }
+
+    val lines = ctx.textFile(input)
+    val links = lines.map { s =>
+        val parts = s.split("\\s+")
+        (parts(0).toInt, parts(1).toInt)
+      }
+      .distinct(numPartitions)
+      .groupByKey()
+      .persist(StorageLevel.MEMORY_ONLY_SER)
     var ranks = links.mapValues(v => 1.0)
 
     for (i <- 1 to iters) {
@@ -68,9 +80,24 @@ object PageRankSimple {
         urls.map(url => (url, rank / size))
       }
       ranks = contribs.reduceByKey(_ + _).mapValues(0.15 + 0.85 * _)
+//      ranks = contribs.combineByKeyWithInterval(
+//        createCombiner,
+//        mergeValue,
+//        mergeCombiners,
+//        Partitioner.defaultPartitioner(contribs)
+//      )
+//      .mapValues {
+//        0.15 + 0.85 * _
+//      }
+//      .reduceByKey((a, b) => b)
     }
 
-    ranks.saveAsTextFile(output)
+    if (output.isEmpty) {
+      val totalPagerank = ranks.map(_._2).sum()
+      println(s"Total pagerank: $totalPagerank")
+    } else {
+      ranks.saveAsTextFile(output)
+    }
 
     ctx.stop()
   }

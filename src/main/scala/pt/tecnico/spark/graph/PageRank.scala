@@ -34,8 +34,8 @@ object PageRank {
 
     // Run page rank algorithm and save the result
     if (output.isEmpty) {
-      // No output, we just call foreachPartition to force materialization
-      graph.staticPageRank(iteration).vertices.foreachPartition(x => {})
+      val totalPagerank = graph.staticPageRank(iteration).vertices.values.sum()
+      println(s"Total pagerank: $totalPagerank")
     } else {
       graph.staticPageRank(iteration).vertices.saveAsTextFile(output)
     }

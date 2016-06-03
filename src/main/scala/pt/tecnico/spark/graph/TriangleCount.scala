@@ -29,7 +29,8 @@ object TriangleCount {
     // Find the triangle count for each vertex
     if (output.isEmpty) {
       // No output, we just call foreachPartition to force materialization
-      graph.triangleCount().vertices.foreachPartition(x => {})
+      val totalTriangle = graph.triangleCount().vertices.values.sum()
+      println(s"Total triangle: $totalTriangle")
     } else {
       graph.triangleCount().vertices.saveAsTextFile(output)
     }

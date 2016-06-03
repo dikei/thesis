@@ -34,7 +34,8 @@ object ConnectedComponent {
 
     // Calculate and save the connected components
     if (output.isEmpty) {
-      graph.connectedComponents().vertices.foreachPartition(x => {})
+      val componentCount = graph.connectedComponents().vertices.values.distinct().count()
+      println(s"Component count: $componentCount")
     } else {
       graph.connectedComponents().vertices.saveAsTextFile(output)
     }
