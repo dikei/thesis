@@ -161,6 +161,7 @@ class StageRuntimeReportListener(statisticDir: String) extends SparkListener wit
         host = taskInfo.host,
         startTime = taskInfo.launchTime,
         endTime = taskInfo.finishTime,
+        gcTime = taskMetric.jvmGCTime,
         waitForParentPeriods = _waitForParentPeriods
       )
     }

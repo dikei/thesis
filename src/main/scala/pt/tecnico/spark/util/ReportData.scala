@@ -128,6 +128,7 @@ case class TaskData (
     host: String,
     startTime: Long,
     endTime: Long,
+    gcTime: Long,
     waitForParentPeriods: Array[WaitPeriod]) {
 
   lazy val duration: Long = endTime - startTime
