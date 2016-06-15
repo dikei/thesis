@@ -26,14 +26,14 @@ import scala.io.Source
   */
 object Utils {
 
-  val blacklisted = Pattern.compile("master\\.novalocal")
+  val blacklisted = Pattern.compile("master")
   val cpuPattern = Pattern.compile("cpu\\/percent-idle\\.rrd")
   val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time\\.rrd|disk-vda\\/disk_io_time\\.rrd")
   val networkPattern = Pattern.compile("interface-eth0\\/if_octets\\.rrd")
   val loadPattern = Pattern.compile("load\\/load\\.rrd")
   val rrdParser = new RRDp(".", null)
 
-  def parseJsonInput(statsDir: String): Array[(AppData, Seq[StageData], String)] = {
+  def parseJsonInput(statsDir: String, skipStage: Int = -1): Array[(AppData, Seq[StageData], String)] = {
     implicit val formats = DefaultFormats + new org.json4s.ext.EnumSerializer(ReadMethod)
 
     val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.json$"))
@@ -52,10 +52,11 @@ object Utils {
             failureDetected = false
             i = stageCount
           } else {
-            if (stage.stageId != 0)
-            // Skip over stage 0 (data loading), no overlap
+//            stages += stage
+            if (stage.stageId > skipStage)
+              // Skip over stage 0 (data loading), no overlap
               stages += stage
-            else
+            else if (stage.stageId == skipStage)
               appData.start = stage.completionTime
           }
           i += 1
@@ -114,8 +115,8 @@ object Utils {
       new Color(94,60,153)
     )
 
-    val dateFormat = new RelativeDateFormat(startTime)
-    val timeAxis = new DateAxis(timeAxisLabel)
+    val dateFormat = new RelativeSecondFormat(startTime)
+    val timeAxis = new CustomDateAxis(timeAxisLabel)
     timeAxis.setAutoRange(true)
     timeAxis.setDateFormatOverride(dateFormat)
     timeAxis.setMinimumDate(new Date(startTime))
@@ -125,7 +126,7 @@ object Utils {
 
 
     val valueAxis = new NumberAxis(valueAxisLabel)
-    valueAxis.setAutoRangeIncludesZero(false)
+    valueAxis.setAutoRangeIncludesZero(true)
 
     val combinedPlot = new CombinedDomainXYPlot(timeAxis)
     combinedPlot.setOrientation(PlotOrientation.VERTICAL)

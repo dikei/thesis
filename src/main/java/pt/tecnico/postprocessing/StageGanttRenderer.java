@@ -40,7 +40,7 @@ class StageGanttRenderer extends GanttRenderer {
                     String subTaskName = t.getSubtask(index - 1).getDescription();
                     if (subTaskName.startsWith("Wait")) {
                         index++;
-                        return Color.BLACK;
+                        return new Color(64, 64, 64, 128);
                     }
                 } else {
                     System.out.println("Unexpected index: " + index);

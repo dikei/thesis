@@ -72,7 +72,7 @@ object StageRuntimeAnalyzer {
     val rrdDir = args(1)
     val outFile = args(2)
 
-    val data = Utils.parseJsonInput(statsDir)
+    val data = Utils.parseJsonInput(statsDir, skipStage = 0)
 
     println("Generating csv")
     generateCsv(data, rrdDir, outFile)
@@ -151,12 +151,14 @@ object StageRuntimeAnalyzer {
       }
       collection.add(stageSeries)
       executorSeries.values.foreach(collection.add)
-      val dateFormat = new RelativeDateFormat(appData.start)
-      val timeAxis = new DateAxis("Time")
-      timeAxis.setAutoRange(true)
+      val dateFormat = new RelativeSecondFormat(appData.start)
+      val timeAxis = new CustomDateAxis("Time")
+      timeAxis.setLowerBound(0)
       timeAxis.setDateFormatOverride(dateFormat)
-      timeAxis.setMinimumDate(new Date(appData.start))
-      timeAxis.setMaximumDate(new Date(appData.end))
+      timeAxis.setRange(new Date(appData.start), new Date(appData.end))
+      timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 10))
+      timeAxis.setMinorTickMarksVisible(true)
+      timeAxis.setMinorTickCount(2)
       timeAxis.setLowerMargin(0.02)
       timeAxis.setUpperMargin(0.02)
 
