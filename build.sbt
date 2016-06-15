@@ -22,3 +22,5 @@ libraryDependencies ++= Seq(
 
 assemblyJarName in assembly := s"${name.value}-assembly-${version.value}.jar"
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)
+
+fork := true
