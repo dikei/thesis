@@ -72,7 +72,7 @@ object StageRuntimeAnalyzer {
     val rrdDir = args(1)
     val outFile = args(2)
 
-    val data = Utils.parseJsonInput(statsDir, skipStage = 0)
+    val data = Utils.parseJsonInput(statsDir, stageFilter = Some(stageFilter))
 
     println("Generating csv")
     generateCsv(data, rrdDir, outFile)
@@ -80,6 +80,8 @@ object StageRuntimeAnalyzer {
     println("Plotting stage gantt chart")
     plotStageGanttChart(data)
   }
+
+  def stageFilter(stage: StageData): Boolean = stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
 
   def plotStageGanttChart(data: Seq[(AppData, Seq[StageData], String)]): Unit = {
     val jobFont = new Font("Dialog", Font.PLAIN, 40)

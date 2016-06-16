@@ -33,7 +33,7 @@ object Utils {
   val loadPattern = Pattern.compile("load\\/load\\.rrd")
   val rrdParser = new RRDp(".", null)
 
-  def parseJsonInput(statsDir: String, skipStage: Int = -1): Array[(AppData, Seq[StageData], String)] = {
+  def parseJsonInput(statsDir: String, stageFilter: Option[(StageData) => Boolean] = None): Array[(AppData, Seq[StageData], String)] = {
     implicit val formats = DefaultFormats + new org.json4s.ext.EnumSerializer(ReadMethod)
 
     val files = new File(statsDir).listFiles(new PatternFilenameFilter("(.*)\\.json$"))
@@ -52,15 +52,20 @@ object Utils {
             failureDetected = false
             i = stageCount
           } else {
-//            stages += stage
-            if (stage.stageId > skipStage)
-              // Skip over stage 0 (data loading), no overlap
+            if (stageFilter.isEmpty) {
               stages += stage
-            else if (stage.stageId == skipStage)
-              appData.start = stage.completionTime
+            } else {
+              stageFilter.foreach { func =>
+                if (func(stage)) {
+                  stages += stage
+                }
+              }
+            }
           }
           i += 1
         }
+        appData.start = stages.map(_.startTime).min
+        appData.end = stages.map(_.completionTime).max
         // Skip over file that contained failed run
         if (!failureDetected) {
           Seq((appData, stages.toSeq, f.getAbsolutePath))

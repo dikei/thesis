@@ -26,11 +26,13 @@ object TotalRuntimeAnalyzer {
 
     val statsDir = args(0)
     val output = args(1)
-    val data = Utils.parseJsonInput(statsDir)
+    val data = Utils.parseJsonInput(statsDir, Some(stageFilter))
 
     println("Plotting runtime distribution")
     plotRuntimeDistribution(trimRuns(data, 10), output)
   }
+
+  def stageFilter(stage: StageData): Boolean =  stage.stageId >= 7 && stage.stageId <= 9
 
   def trimRuns(runs: Seq[(AppData, Seq[StageData], String)], percent: Int): Seq[(AppData, Seq[StageData], String)] = {
     val runCount = runs.length

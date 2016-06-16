@@ -20,8 +20,8 @@ object GcAnalyzer {
     val noBarrierDir = args(1)
     val output = args(2)
 
-    val barrierData = Utils.parseJsonInput(barrierDir, 0)
-    val noBarrierData = Utils.parseJsonInput(noBarrierDir, 0)
+    val barrierData = Utils.parseJsonInput(barrierDir, Some(stageFilter))
+    val noBarrierData = Utils.parseJsonInput(noBarrierDir, Some(stageFilter))
 
     val gcCompare = mutable.HashMap[Int, (Long, Long)]()
     var barrierRuntime = 0L
@@ -63,4 +63,6 @@ object GcAnalyzer {
     printer.println()
     printer.close()
   }
+
+  def stageFilter(stage: StageData): Boolean = stage.jobId > 0
 }
