@@ -1,6 +1,8 @@
 package pt.tecnico.postprocessing
 
-import java.io.{File, FileWriter, PrintWriter}
+import java.io.{FileWriter, PrintWriter}
+
+import pt.tecnico.spark.util.StageData
 
 import scala.collection.mutable
 
@@ -26,17 +28,18 @@ object GcAnalyzer {
     val gcCompare = mutable.HashMap[Int, (Long, Long)]()
     var barrierRuntime = 0L
     barrierData.foreach { case (appData, stages, _) =>
-
       stages.sortBy(_.startTime).foreach { stage =>
         val gcTime = stage.tasks.map(_.gcTime).sum
         barrierRuntime += stage.tasks.map { t =>
           t.duration - t.waitForPartialOutputTime
         }.sum
-        gcCompare += stage.stageId -> (gcTime, 0L)
+        val prevResult = gcCompare.getOrElse(stage.stageId, (0L, 0L))
+        val barrierTime = prevResult._1
+        val noBarrierTime = prevResult._2
+        gcCompare += stage.stageId -> (barrierTime + gcTime, noBarrierTime)
       }
     }
-
-    val printer = new PrintWriter(new FileWriter(output, true))
+    val avgBarrierRuntime = barrierRuntime / barrierData.length
 
     var noBarrierRuntime = 0L
     noBarrierData.foreach { case (appData, stages, _) =>
@@ -45,21 +48,29 @@ object GcAnalyzer {
         noBarrierRuntime += stage.tasks.map { t =>
           t.duration - t.waitForPartialOutputTime
         }.sum
-        val barrierTime = gcCompare.getOrElse(stage.stageId, (0L, 0L))._1
-        gcCompare += stage.stageId -> (barrierTime, gcTime)
+        val prevResult = gcCompare.getOrElse(stage.stageId, (0L, 0L))
+        val barrierTime = prevResult._1
+        val noBarrierTime = prevResult._2
+        gcCompare += stage.stageId -> (barrierTime, noBarrierTime + gcTime)
       }
     }
+    val avgNoBarrierRuntime = noBarrierRuntime / barrierData.length
 
+    val printer = new PrintWriter(new FileWriter(output, true))
     printer.println(s"Comparing $barrierDir and $noBarrierDir")
+
     var totalGCBarrier = 0L
     var totalGCNoBarrier = 0L
     gcCompare.toArray.sortBy(_._1).foreach { case (stageId, (barrier, noBarrier)) =>
-      totalGCBarrier += barrier
-      totalGCNoBarrier += noBarrier
-      printer.println(s"Stage $stageId, gcTime: $barrier \t $noBarrier")
+      val avgBarrierTime = barrier / barrierData.length
+      val avgNoBarrierTime = noBarrier / noBarrierData.length
+      totalGCBarrier += avgBarrierTime
+      totalGCNoBarrier += avgNoBarrierTime
+      printer.println(s"Stage $stageId, gcTime: $avgBarrierTime \t $avgNoBarrierTime")
     }
     printer.println(s"Total GC Time: $totalGCBarrier \t $totalGCNoBarrier")
-    printer.println(s"GC Timer Percentage: ${totalGCBarrier.toDouble/barrierRuntime * 100} \t ${totalGCNoBarrier.toDouble/noBarrierRuntime * 100}")
+    printer.println(s"GC Timer Percentage: " +
+      s" ${totalGCBarrier.toDouble/avgBarrierRuntime * 100} \t ${totalGCNoBarrier.toDouble/avgNoBarrierRuntime * 100}")
     printer.println()
     printer.close()
   }
