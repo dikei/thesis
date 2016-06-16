@@ -1,9 +1,10 @@
 package pt.tecnico.spark.graph
 
 import org.apache.spark.graphx.lib.SVDPlusPlus.Conf
-import org.apache.spark.graphx.{Edge, GraphLoader}
+import org.apache.spark.graphx.{Edge, GraphLoader, GraphXUtils}
 import org.apache.spark.graphx.lib.SVDPlusPlus
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.{SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
 /**
@@ -34,10 +35,14 @@ object SVDPP {
     val conf = new SparkConf().setAppName("SVD++")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    GraphXUtils.registerKryoClasses(conf)
+
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val graph = GraphLoader.edgeListFile(sc, input, numEdgePartitions = noPartition)
+    val graph = GraphLoader.edgeListFile(sc, input, numEdgePartitions = noPartition,
+      edgeStorageLevel = StorageLevel.MEMORY_ONLY_SER,
+      vertexStorageLevel = StorageLevel.MEMORY_ONLY_SER)
     val edges = graph.edges.map( e => new Edge(e.srcId, e.dstId, e.attr.toDouble))
 
     val svdconf = new Conf(rank, iteration, minVal, maxVal, gamma1, gamma2, gamma6, gamma7)

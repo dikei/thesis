@@ -1,7 +1,8 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.graphx.{PartitionStrategy, GraphLoader}
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.graphx.{GraphLoader, GraphXUtils, PartitionStrategy}
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.{SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
 /**
@@ -19,12 +20,14 @@ object TriangleCount {
     val conf = new SparkConf().setAppName("TriangleCount")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    GraphXUtils.registerKryoClasses(conf)
 
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val graph = GraphLoader.edgeListFile(sc, input, canonicalOrientation = true, numEdgePartitions = noPartitions)
-      .partitionBy(PartitionStrategy.RandomVertexCut)
+    val graph = GraphLoader.edgeListFile(sc, input, canonicalOrientation = true,
+      vertexStorageLevel = StorageLevel.MEMORY_ONLY_SER, edgeStorageLevel = StorageLevel.MEMORY_ONLY_SER)
+      .partitionBy(PartitionStrategy.RandomVertexCut, noPartitions)
 
     // Find the triangle count for each vertex
     if (output.isEmpty) {

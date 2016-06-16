@@ -1,6 +1,6 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.graphx.PartitionStrategy
+import org.apache.spark.graphx.{GraphXUtils, PartitionStrategy}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.graphx.util.GraphGenerators
 
@@ -24,6 +24,8 @@ object GraphGen {
     val conf = new SparkConf().setAppName("GraphGen")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    GraphXUtils.registerKryoClasses(conf)
+
     val sc = new SparkContext(conf)
 
     val graph = GraphGenerators

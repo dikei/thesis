@@ -1,6 +1,7 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.graphx.{GraphLoader, PartitionStrategy}
+import org.apache.spark.graphx.{GraphLoader, GraphXUtils, PartitionStrategy}
+import org.apache.spark.storage.StorageLevel
 import org.apache.spark.{SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
@@ -24,13 +25,18 @@ object ConnectedComponent {
     val conf = new SparkConf().setAppName("ConnectedComponent")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    GraphXUtils.registerKryoClasses(conf)
     val sc = new SparkContext(conf)
 
     val listener = new StageRuntimeReportListener(statsDir)
     sc.addSparkListener(listener)
 
     val graph = GraphLoader
-      .edgeListFile(sc, input, numEdgePartitions = partitionCount)
+      .edgeListFile(sc, input,
+        vertexStorageLevel = StorageLevel.MEMORY_ONLY_SER,
+        edgeStorageLevel = StorageLevel.MEMORY_ONLY_SER,
+        numEdgePartitions = partitionCount)
+//      .partitionBy(PartitionStrategy.EdgePartition2D, partitionCount)
 
     // Calculate and save the connected components
     if (output.isEmpty) {

@@ -1,6 +1,7 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.graphx.{GraphLoader, PartitionStrategy}
+import org.apache.spark.graphx.{GraphLoader, GraphXUtils, PartitionStrategy}
+import org.apache.spark.storage.StorageLevel
 import org.apache.spark.{SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
@@ -19,18 +20,19 @@ object PageRank {
     val input = args(0)
     val output = args(1)
     val iteration = if (args.length > 2) args(2).toInt else 10
-    val partitions = if (args.length > 3) args(3).toInt else -1
+    val numPartitions = if (args.length > 3) args(3).toInt else -1
     val statisticDir = if (args.length > 4) args(4) else "stats"
 
     val conf = new SparkConf().setAppName("PageRankGraph")
     conf.set("spark.hadoop.validateOutputSpecs", "false")
     conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    GraphXUtils.registerKryoClasses(conf)
 
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statisticDir))
 
     val graph = GraphLoader
-      .edgeListFile(sc, input, numEdgePartitions = partitions)
+      .edgeListFile(sc, input, numEdgePartitions = numPartitions)
 
     // Run page rank algorithm and save the result
     if (output.isEmpty) {
