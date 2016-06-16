@@ -64,8 +64,9 @@ object Utils {
           }
           i += 1
         }
-        appData.start = stages.map(_.startTime).min
-        appData.end = stages.map(_.completionTime).max
+        appData.start = stages.filter(_.taskCount > 0).map(_.startTime).min
+        appData.end = stages.filter(_.taskCount > 0).map(_.completionTime).max
+
         // Skip over file that contained failed run
         if (!failureDetected) {
           Seq((appData, stages.toSeq, f.getAbsolutePath))

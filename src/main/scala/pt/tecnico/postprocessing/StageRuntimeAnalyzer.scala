@@ -101,7 +101,7 @@ object StageRuntimeAnalyzer {
         val sortedStages = jobStages.sortBy(_.startTime)
         var startTime = java.lang.Long.MAX_VALUE
         var endTime = -1L
-        sortedStages.foreach { stage =>
+        sortedStages.filter(_.taskCount > 0)foreach { stage =>
           stageProcessed += 1
           if (startTime > stage.startTime) {
             startTime = stage.startTime
@@ -136,8 +136,8 @@ object StageRuntimeAnalyzer {
           }
           executorSeries.values.foreach { executor =>
             if (executor.getItemCount < stageProcessed) {
-                // This executor doesn't run any task in this stage
-                executor.add(new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.startTime)))
+              // This executor doesn't run any task in this stage
+              executor.add(new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.startTime)))
             }
           }
         }
@@ -186,8 +186,8 @@ object StageRuntimeAnalyzer {
 
   def generateCsv(data: Array[(AppData, Seq[StageData], String)], rrdDir: String, outFile: String): Unit = {
     val average = data.flatMap(run => run._2).groupBy(_.stageId)
-      .map { case (stageId, runs) =>
-        val validRuns = runs.map { case (stageData: StageData) =>
+      .map { case (stageId, stages) =>
+        val validRuns = stages.filter(_.taskCount > 0).map { case (stageData: StageData) =>
           val startDir = new File(rrdDir)
           val cpuUsage = 100 - Utils.computeClusterAverage(
             Utils.cpuPattern,
@@ -218,7 +218,7 @@ object StageRuntimeAnalyzer {
             Utils.computeDownloadNodeAverage
           )
 
-          new StageRuntimeStatistic(
+          val ret = new StageRuntimeStatistic(
             stageId,
             stageData.average,
             stageData.fastest,
@@ -245,41 +245,46 @@ object StageRuntimeAnalyzer {
             stageData.hadoopInput,
             stageData.networkInput,
             stageData.diskInput)
-        }.filter { s =>
+
+          (ret, 1)
+        }.filter { case (s, _) =>
           !s.getCpuUsage.isNaN && !s.getSystemLoad.isNaN && !s.getUpload.isNaN && !s.getDownload.isNaN
         }
 
-        val total = validRuns.reduce[StageRuntimeStatistic] { case (s1: StageRuntimeStatistic, s2: StageRuntimeStatistic) =>
-          new StageRuntimeStatistic(
-            stageId,
-            s1.getAverage + s2.getAverage,
-            s1.getFastest + s2.getFastest,
-            s1.getSlowest + s2.getSlowest,
-            s1.getStandardDeviation + s2.getStandardDeviation,
-            s1.getName,
-            s1.getTaskCount + s2.getTaskCount,
-            s1.getPercent5 + s2.getPercent5,
-            s1.getPercent25 + s2.getPercent25,
-            s1.getMedian + s2.getMedian,
-            s1.getPercent75 + s2.getPercent75,
-            s1.getPercent95 + s2.getPercent95,
-            s1.getTotalTaskRuntime + s2.getTotalTaskRuntime,
-            s1.getStageRuntime + s2.getStageRuntime,
-            s1.getFetchWaitTime + s2.getFetchWaitTime,
-            s1.getShuffleWriteTime + s2.getShuffleWriteTime,
-            s1.getCpuUsage + s2.getCpuUsage,
-            s1.getSystemLoad + s2.getSystemLoad,
-            s1.getUpload + s2.getUpload,
-            s1.getDownload + s2.getDownload,
-            s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime,
-            s1.getInitialReadTime + s2.getInitialReadTime,
-            s1.getMemoryInput + s2.getMemoryInput,
-            s1.getHadoopInput + s2.getHadoopInput,
-            s1.getNetworkInput + s2.getNetworkInput,
-            s1.getDiskInput + s2.getDiskInput
-          )
+        val (total, count) = validRuns.reduce[(StageRuntimeStatistic, Int)] {
+          case ((s1: StageRuntimeStatistic, c1: Int), (s2: StageRuntimeStatistic, c2: Int)) =>
+            val ret = new StageRuntimeStatistic(
+              stageId,
+              s1.getAverage + s2.getAverage,
+              s1.getFastest + s2.getFastest,
+              s1.getSlowest + s2.getSlowest,
+              s1.getStandardDeviation + s2.getStandardDeviation,
+              s1.getName,
+              s1.getTaskCount + s2.getTaskCount,
+              s1.getPercent5 + s2.getPercent5,
+              s1.getPercent25 + s2.getPercent25,
+              s1.getMedian + s2.getMedian,
+              s1.getPercent75 + s2.getPercent75,
+              s1.getPercent95 + s2.getPercent95,
+              s1.getTotalTaskRuntime + s2.getTotalTaskRuntime,
+              s1.getStageRuntime + s2.getStageRuntime,
+              s1.getFetchWaitTime + s2.getFetchWaitTime,
+              s1.getShuffleWriteTime + s2.getShuffleWriteTime,
+              s1.getCpuUsage + s2.getCpuUsage,
+              s1.getSystemLoad + s2.getSystemLoad,
+              s1.getUpload + s2.getUpload,
+              s1.getDownload + s2.getDownload,
+              s1.getPartialOutputWaitTime + s2.getPartialOutputWaitTime,
+              s1.getInitialReadTime + s2.getInitialReadTime,
+              s1.getMemoryInput + s2.getMemoryInput,
+              s1.getHadoopInput + s2.getHadoopInput,
+              s1.getNetworkInput + s2.getNetworkInput,
+              s1.getDiskInput + s2.getDiskInput
+            )
+
+            (ret, c1 + c2)
         }
-        val count = validRuns.length
+
         new StageRuntimeStatistic(
           stageId,
           total.getAverage / count,
