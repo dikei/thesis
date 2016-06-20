@@ -28,7 +28,7 @@ object KMeanApp {
     val parsedData = data.map(s => Vectors.dense(s.split(' ').map(_.toDouble))).cache()
 
     // Cluster the data
-    val clusters = KMeans.train(parsedData, numClusters, numIterations)
+    val clusters = KMeans.train(parsedData, numClusters, numIterations, 1, initializationMode = KMeans.RANDOM)
 
     // Evaluate clustering by computing Within Set Sum of Squared Errors
     val WSSSE = clusters.computeCost(parsedData)
