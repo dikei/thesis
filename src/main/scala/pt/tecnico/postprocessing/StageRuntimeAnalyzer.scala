@@ -74,14 +74,14 @@ object StageRuntimeAnalyzer {
 
     val data = Utils.parseJsonInput(statsDir, stageFilter = Some(stageFilter))
 
-    println("Generating csv")
-    generateCsv(data, rrdDir, outFile)
+//    println("Generating csv")
+//    generateCsv(data, rrdDir, outFile)
 
     println("Plotting stage gantt chart")
     plotStageGanttChart(data)
   }
 
-  def stageFilter(stage: StageData): Boolean = stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
+  def stageFilter(stage: StageData): Boolean = true // stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
 
   def plotStageGanttChart(data: Seq[(AppData, Seq[StageData], String)]): Unit = {
     val jobFont = new Font("Dialog", Font.PLAIN, 40)
@@ -101,7 +101,7 @@ object StageRuntimeAnalyzer {
         val sortedStages = jobStages.sortBy(_.startTime)
         var startTime = java.lang.Long.MAX_VALUE
         var endTime = -1L
-        sortedStages.filter(_.taskCount > 0)foreach { stage =>
+        sortedStages.filter(_.taskCount > 0).foreach { stage =>
           stageProcessed += 1
           if (startTime > stage.startTime) {
             startTime = stage.startTime

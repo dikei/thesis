@@ -298,4 +298,15 @@ object Utils {
       Double.NaN
     }
   }
+
+  def trimRuns(runs: Seq[(AppData, Seq[StageData], String)], percent: Int): Seq[(AppData, Seq[StageData], String)] = {
+    val runCount = runs.length
+
+    val lower = runCount * percent / 100
+    val upper = runCount * (100 - percent) / 100
+    println(s"Trimming: $lower, $upper")
+    runs.sortBy { case (appData, _, _) =>
+      appData.runtime
+    }.slice(lower, upper + 1)
+  }
 }
