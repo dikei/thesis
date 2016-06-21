@@ -1,5 +1,8 @@
 package pt.tecnico.spark
 
+import java.util.Collections
+
+import scala.collection.JavaConverters._
 import org.apache.spark.{SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
@@ -18,25 +21,33 @@ object Shuffle {
     conf.setAppName(s"Shuffle-$iteration")
       .set("spark.hadoop.validateOutputSpecs", "false")
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .registerKryoClasses(Array(classOf[(String, Long)]))
+      .registerKryoClasses(Array(classOf[String]))
 
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val initialRDD = sc.textFile(input).zipWithUniqueId()
+    val initialRDD = sc.textFile(input).repartition(partitionCount)
+
+    // Force-load the file into memory to avoid the variant in reading speed from HDFS
+    val initialCount = initialRDD.count()
 
     var i = 0
     var currentRDD = initialRDD
     while (i < iteration) {
-      currentRDD = currentRDD.repartition(partitionCount).mapValues { v =>
-        val s = v % 1000007
-        Math.pow(Math.cbrt(Math.pow(s, 3)), 3).toLong
-      }
+      currentRDD = currentRDD
+        .map { line =>
+          val charsArray = java.util.Arrays.asList(line.toCharArray:_*)
+          Collections.shuffle(charsArray)
+          charsArray.asScala.mkString("")
+        }
+        .repartition(partitionCount)
       i += 1
     }
 
     // Calculate line count
     val linesCount = currentRDD.count()
-    println(s"Lines count: $linesCount")
+
+    println(s"Initial lines count: $initialCount")
+    println(s"Final lines count: $linesCount")
   }
 }
