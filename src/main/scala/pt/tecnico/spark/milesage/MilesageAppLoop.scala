@@ -63,10 +63,9 @@ object MilesageAppLoop {
           (flights(0), (passengerId, leftFlights, score))
         }
         .join(flightsRDD)
-        .mapValues { case ((passengerId, leftFlights, oldScore), flightScore) =>
+        .map { case (_, ((passengerId, leftFlights, oldScore), flightScore)) =>
           (passengerId, leftFlights, oldScore + flightScore)
         }
-        .values
         .cache()
 
       activePassenger = tmp.filter(_._2.nonEmpty).cache()
