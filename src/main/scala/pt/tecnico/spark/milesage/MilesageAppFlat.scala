@@ -1,6 +1,7 @@
 package pt.tecnico.spark.milesage
 
 import org.apache.spark.{HashPartitioner, SparkConf, SparkContext}
+import pt.tecnico.spark.util.StageRuntimeReportListener
 
 import scala.collection.mutable
 
@@ -10,10 +11,12 @@ import scala.collection.mutable
 object MilesageAppFlat {
 
   def main(args: Array[String]): Unit = {
+
     val passengersFile = args(0)
     val flightsFile = args(1)
     val outputFile = args(2)
     val numPartitions = args(3).toInt
+    val statDir = if (args.length > 4) args(4) else "stats"
 
     val conf = new SparkConf()
     conf.setAppName(s"MilesageAppFlat")
@@ -24,6 +27,7 @@ object MilesageAppFlat {
         classOf[(Int, Long)]))
 
     val sc = new SparkContext(conf)
+    sc.addSparkListener(new StageRuntimeReportListener(statDir))
 
     val passengersRDD = sc.textFile(passengersFile, numPartitions).map { line =>
       val lineSplit = line.split(' ')
