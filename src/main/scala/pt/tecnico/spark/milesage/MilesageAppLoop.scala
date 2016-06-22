@@ -1,7 +1,6 @@
 package pt.tecnico.spark.milesage
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.storage.StorageLevel
 import org.apache.spark.{SparkConf, SparkContext}
 
 /**
@@ -21,9 +20,9 @@ object MilesageAppLoop {
       .set("spark.hadoop.validateOutputSpecs", "false")
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .registerKryoClasses(Array(
-        classOf[(Int, Array[Int])],
+        classOf[(Int, Array[Int], Long)],
         classOf[(Int, Int)],
-        classOf[(Int, (Int, Array[Int]))],
+        classOf[(Int, (Int, Array[Int], Long))],
         classOf[(Int, Long)]))
 
     val sc = new SparkContext(conf)
@@ -57,7 +56,7 @@ object MilesageAppLoop {
 
     while (activeCount > 0) {
       val prevActive = activePassenger
-      val prevResult = resultRDD
+      val prevActiveCount = activeCount
 
       val tmp = activePassenger
         .map { case (passengerId, flights, score) =>
@@ -76,13 +75,17 @@ object MilesageAppLoop {
       activeCount = activePassenger.count()
       prevActive.unpersist(false)
 
-      val finalRet = tmp.filter(_._2.isEmpty).map { case (passenger, flights, score) =>
-        (passenger, score)
+      if (prevActiveCount > activeCount) {
+        val prevResult = resultRDD
+        val update = tmp.filter(_._2.isEmpty).map { case (passenger, flights, score) =>
+          (passenger, score)
+        }
+        resultRDD = resultRDD.union(update).cache()
+        // Force materialization so we can throw away the previous version
+        val resultCount = resultRDD.count()
+        println(s"Passenger complete: $resultCount")
+        prevResult.unpersist(false)
       }
-      resultRDD = resultRDD.union(finalRet).persist(StorageLevel.MEMORY_AND_DISK_SER)
-      // Force materialization so we can throw away the previous version
-      resultRDD.count()
-      prevResult.unpersist(false)
 
       tmp.unpersist(false)
     }
@@ -96,11 +99,8 @@ object MilesageAppLoop {
       resultRDD.sortByKey()
         .saveAsTextFile(outputFile)
     } else {
-      val accumulator = sc.accumulator[Long](0L)
-      resultRDD.foreach { case (passenger, score) =>
-        accumulator += score
-      }
-      println(s"Total miles: ${accumulator.value}")
+      val total = resultRDD.values.fold(0)(_ + _)
+      println(s"Total miles: $total")
     }
   }
 
