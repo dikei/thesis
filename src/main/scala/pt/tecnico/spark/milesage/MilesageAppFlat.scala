@@ -61,7 +61,7 @@ object MilesageAppFlat {
     if (outputFile.nonEmpty) {
       resultRDD.repartitionAndSortWithinPartitions(new HashPartitioner(numPartitions)).saveAsTextFile(outputFile)
     } else {
-      val total = resultRDD.values.fold(0)(_ + _)
+      val total = resultRDD.values.fold(0L)(_ + _)
       println(s"Total miles: $total")
     }
   }

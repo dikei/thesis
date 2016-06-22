@@ -21,7 +21,6 @@ object MilesageAppLoop {
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .registerKryoClasses(Array(
         classOf[(Int, Array[Int], Long)],
-        classOf[(Int, Int)],
         classOf[(Int, (Int, Array[Int], Long))],
         classOf[(Int, Long)]))
 
@@ -41,7 +40,7 @@ object MilesageAppLoop {
       val lineSplit = line.split(' ')
 
       val flightId = lineSplit(0).toInt
-      val flightScores = lineSplit(1).toInt
+      val flightScores = lineSplit(1).toLong
       (flightId, flightScores)
     }.cache()
 
@@ -98,7 +97,7 @@ object MilesageAppLoop {
     if (outputFile.nonEmpty) {
       resultRDD.repartitionAndSortWithinPartitions(new HashPartitioner(numPartitions)).saveAsTextFile(outputFile)
     } else {
-      val total = resultRDD.values.fold(0)(_ + _)
+      val total = resultRDD.values.fold(0L)(_ + _)
       println(s"Total miles: $total")
     }
   }
