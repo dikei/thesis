@@ -1,6 +1,6 @@
 package pt.tecnico.spark.milesage
 
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.{HashPartitioner, SparkConf, SparkContext}
 
 import scala.collection.mutable
 
@@ -59,8 +59,7 @@ object MilesageAppFlat {
     println(s"Flights: $flightCount")
 
     if (outputFile.nonEmpty) {
-      resultRDD.sortByKey()
-        .saveAsTextFile(outputFile)
+      resultRDD.repartitionAndSortWithinPartitions(new HashPartitioner(numPartitions)).saveAsTextFile(outputFile)
     } else {
       val total = resultRDD.values.fold(0)(_ + _)
       println(s"Total miles: $total")

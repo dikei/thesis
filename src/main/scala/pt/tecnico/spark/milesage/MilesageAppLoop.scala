@@ -1,7 +1,7 @@
 package pt.tecnico.spark.milesage
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.{HashPartitioner, SparkConf, SparkContext}
 
 /**
   * Created by dikei on 6/22/16.
@@ -96,8 +96,7 @@ object MilesageAppLoop {
     println(s"Flights: $flightCount")
 
     if (outputFile.nonEmpty) {
-      resultRDD.sortByKey()
-        .saveAsTextFile(outputFile)
+      resultRDD.repartitionAndSortWithinPartitions(new HashPartitioner(numPartitions)).saveAsTextFile(outputFile)
     } else {
       val total = resultRDD.values.fold(0)(_ + _)
       println(s"Total miles: $total")
