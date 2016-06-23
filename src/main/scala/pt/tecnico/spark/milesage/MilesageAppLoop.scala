@@ -30,7 +30,6 @@ object MilesageAppLoop {
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statDir))
 
-    val partitioner = new HashPartitioner(numPartitions)
     val passengersRDD = sc.textFile(passengersFile, numPartitions)
       .map { line =>
         val lineSplit = line.split(' ')
@@ -39,8 +38,7 @@ object MilesageAppLoop {
         val flights = lineSplit(1).split('|').map(_.toInt)
         (passenger, (flights, 0L))
       }
-      .filter(_._2._1.nonEmpty)
-      .partitionBy(partitioner)
+      .repartition(numPartitions)
       .persist(StorageLevel.MEMORY_AND_DISK)
 
     val passengerCount = passengersRDD.count()
@@ -51,7 +49,7 @@ object MilesageAppLoop {
       val flightId = lineSplit(0).toInt
       val flightScores = lineSplit(1).toLong
       (flightId, flightScores)
-    }.persist(StorageLevel.MEMORY_AND_DISK)
+    }.repartition(numPartitions).persist(StorageLevel.MEMORY_AND_DISK)
 
     val flightCount = flightsRDD.count()
 
@@ -70,7 +68,7 @@ object MilesageAppLoop {
           (flights(iteration), passengerId)
         }
         .join(flightsRDD)
-        .map { case (_, ((passengerId), flightScore)) =>
+        .map { case (_, (passengerId, flightScore)) =>
           (passengerId, flightScore)
         }
 
@@ -85,7 +83,7 @@ object MilesageAppLoop {
       // Update active passenger for next round
       activePassenger = newScores
         .filter { case (passengerId, (flights, score)) =>
-          iteration < flights.length
+          iteration < flights.length - 1
         }
         .persist(StorageLevel.MEMORY_AND_DISK)
       // Force materialization so we can throw away the previous version
@@ -97,7 +95,7 @@ object MilesageAppLoop {
         val prevResult = resultRDD
         val update = newScores
           .filter { case (passengerId, (flights, score)) =>
-            iteration == flights.length - 1
+            iteration >= flights.length - 1
           }
           .mapValues { case (flights, score) => score }
         resultRDD = resultRDD.union(update).persist(StorageLevel.MEMORY_AND_DISK)

@@ -24,6 +24,7 @@ object MilesageAppFlat {
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .registerKryoClasses(Array(
         classOf[(Int, Array[Int])],
+        classOf[(Int, Int)],
         classOf[(Int, Long)]))
 
     val sc = new SparkContext(conf)
@@ -35,7 +36,7 @@ object MilesageAppFlat {
       val passenger = lineSplit(0).toInt
       val flights = lineSplit(1).split('|').map(_.toInt)
       (passenger, flights)
-    }.cache()
+    }.repartition(numPartitions).cache()
 
     val passengerCount = passengersRDD.count()
 
@@ -45,7 +46,7 @@ object MilesageAppFlat {
       val flightId = lineSplit(0).toInt
       val flightScores = lineSplit(1).toLong
       (flightId, flightScores)
-    }.cache()
+    }.repartition(numPartitions).cache()
 
     val flightCount = flightsRDD.count()
 
