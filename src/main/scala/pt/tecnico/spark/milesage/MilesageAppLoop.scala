@@ -1,6 +1,7 @@
 package pt.tecnico.spark.milesage
 
 import org.apache.spark.rdd.RDD
+import org.apache.spark.storage.StorageLevel
 import org.apache.spark.{HashPartitioner, SparkConf, SparkContext}
 import pt.tecnico.spark.util.StageRuntimeReportListener
 
@@ -22,20 +23,25 @@ object MilesageAppLoop {
       .set("spark.hadoop.validateOutputSpecs", "false")
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .registerKryoClasses(Array(
-        classOf[(Int, Array[Int], Long)],
-        classOf[(Int, (Int, Array[Int], Long))],
-        classOf[(Int, Long)]))
+        classOf[(Int, (Array[Int], Long))],
+        classOf[(Int, Long)],
+        classOf[(Int, Int)]))
 
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statDir))
 
-    val passengersRDD = sc.textFile(passengersFile, numPartitions).map { line =>
-      val lineSplit = line.split(' ')
+    val partitioner = new HashPartitioner(numPartitions)
+    val passengersRDD = sc.textFile(passengersFile, numPartitions)
+      .map { line =>
+        val lineSplit = line.split(' ')
 
-      val passenger = lineSplit(0).toInt
-      val flights = lineSplit(1).split('|').map(_.toInt)
-      (passenger, flights, 0L)
-    }.cache()
+        val passenger = lineSplit(0).toInt
+        val flights = lineSplit(1).split('|').map(_.toInt)
+        (passenger, (flights, 0L))
+      }
+      .filter(_._2._1.nonEmpty)
+      .partitionBy(partitioner)
+      .persist(StorageLevel.MEMORY_AND_DISK)
 
     val passengerCount = passengersRDD.count()
 
@@ -45,50 +51,64 @@ object MilesageAppLoop {
       val flightId = lineSplit(0).toInt
       val flightScores = lineSplit(1).toLong
       (flightId, flightScores)
-    }.cache()
+    }.persist(StorageLevel.MEMORY_AND_DISK)
 
     val flightCount = flightsRDD.count()
 
-    var activePassenger = passengersRDD.filter(_._2.nonEmpty).cache()
-    var resultRDD : RDD[(Int, Long)] = sc.emptyRDD[(Int, Long)].cache()
-    // Force materialization of active passenger and current result,
-    // so we can throw away the passengersRDD
-    var activeCount = activePassenger.count()
-    passengersRDD.unpersist(false)
+    var resultRDD : RDD[(Int, Long)] = sc.emptyRDD[(Int, Long)]
 
+    var activePassenger = passengersRDD
+    var activeCount = passengerCount
+
+    var iteration = 0
     while (activeCount > 0) {
       val prevActive = activePassenger
       val prevActiveCount = activeCount
 
-      val tmp = activePassenger
-        .map { case (passengerId, flights, score) =>
-          val leftFlights = flights.splitAt(1)._2
-          (flights(0), (passengerId, leftFlights, score))
+      val updateScores = activePassenger
+        .map { case (passengerId, (flights, score)) =>
+          (flights(iteration), passengerId)
         }
         .join(flightsRDD)
-        .map { case (_, ((passengerId, leftFlights, oldScore), flightScore)) =>
-          (passengerId, leftFlights, oldScore + flightScore)
+        .map { case (_, ((passengerId), flightScore)) =>
+          (passengerId, flightScore)
         }
-        .cache()
 
-      activePassenger = tmp.filter(_._2.nonEmpty).cache()
+      // Update score into current round active passenger
+      val newScores = activePassenger
+        .join(updateScores)
+        .mapValues { case ((flights, oldScore), newScore) =>
+          (flights, oldScore + newScore)
+        }
+        .persist(StorageLevel.MEMORY_AND_DISK)
+
+      // Update active passenger for next round
+      activePassenger = newScores
+        .filter { case (passengerId, (flights, score)) =>
+          iteration < flights.length
+        }
+        .persist(StorageLevel.MEMORY_AND_DISK)
       // Force materialization so we can throw away the previous version
+      // Count the active vertex in the next round
       activeCount = activePassenger.count()
       prevActive.unpersist(false)
 
       if (prevActiveCount > activeCount) {
         val prevResult = resultRDD
-        val update = tmp.filter(_._2.isEmpty).map { case (passenger, flights, score) =>
-          (passenger, score)
-        }
-        resultRDD = resultRDD.union(update).cache()
+        val update = newScores
+          .filter { case (passengerId, (flights, score)) =>
+            iteration == flights.length - 1
+          }
+          .mapValues { case (flights, score) => score }
+        resultRDD = resultRDD.union(update).persist(StorageLevel.MEMORY_AND_DISK)
         // Force materialization so we can throw away the previous version
         val resultCount = resultRDD.count()
         println(s"Passenger complete: $resultCount")
         prevResult.unpersist(false)
       }
 
-      tmp.unpersist(false)
+      newScores.unpersist(false)
+      iteration += 1
     }
 
     flightsRDD.unpersist(false)
