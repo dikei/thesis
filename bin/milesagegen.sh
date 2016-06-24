@@ -5,6 +5,7 @@ spark-submit --class pt.tecnico.spark.milesage.MilesageGen \
     2500000 \
     100000 \
     10 \
+    10 \
     8 \
     /home/dikei/Tools/tmp/spark-testing/out/passenger \
     /home/dikei/Tools/tmp/spark-testing/out/flight

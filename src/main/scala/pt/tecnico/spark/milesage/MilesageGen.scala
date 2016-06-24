@@ -14,10 +14,11 @@ object MilesageGen {
 
     val passengerCount = args(0).toInt
     val flightsCount = args(1).toInt
-    val flightsPerPassenger = args(2).toInt
-    val partitions = args(3).toInt
-    val passengerOut = args(4)
-    val flightsOut = args(5)
+    val flightsPerPassengerMin = args(2).toInt
+    val flightsPerPassengerMax = args(3).toInt
+    val partitions = args(4).toInt
+    val passengerOut = args(5)
+    val flightsOut = args(6)
 
     val conf = new SparkConf()
     conf.setAppName(s"MilesageGen-$passengerCount-$flightsCount")
@@ -25,10 +26,12 @@ object MilesageGen {
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 
     val sc = new SparkContext(conf)
+    val rangeLength = flightsPerPassengerMax - flightsPerPassengerMin
 
     // Generate passenger data
     println("Generating passenger data")
     sc.parallelize(1 to passengerCount, partitions).map { passengerId =>
+      val flightsPerPassenger = flightsPerPassengerMin + scala.util.Random.nextInt(rangeLength + 1)
       val flights = Array.fill(flightsPerPassenger)(0)
       for (i <- 0 until flightsPerPassenger) {
         flights(i) = scala.util.Random.nextInt(flightsCount)
