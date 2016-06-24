@@ -31,8 +31,8 @@ object StageRuntimeComparer {
     val noBarrierDir = args(1)
     val outFile = args(2)
 
-    val barrierData = Utils.parseJsonInput(barrierDir, stageFilter = Some(stageFilter))
-    val noBarrierData = Utils.parseJsonInput(noBarrierDir, stageFilter = Some(stageFilter))
+    val barrierData = Utils.parseJsonInput(barrierDir, stageFilter = Some(Utils.stageFilter))
+    val noBarrierData = Utils.parseJsonInput(noBarrierDir, stageFilter = Some(Utils.stageFilter))
 
     val barrierAverage = computeAverageStageData(Utils.trimRuns(barrierData, 10))
     val noBarrierAverage = computeAverageStageData(Utils.trimRuns(noBarrierData, 10))
@@ -40,8 +40,6 @@ object StageRuntimeComparer {
     println("Plotting average stage gantt chart")
     plotStageGanttChartAverage(barrierAverage, noBarrierAverage, outFile)
   }
-
-  def stageFilter(stage: StageData): Boolean = true // stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
 
   def plotStageGanttChartAverage(
       barrierData: Seq[(Int, Seq[StageData])],

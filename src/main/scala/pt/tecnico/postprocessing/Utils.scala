@@ -309,4 +309,6 @@ object Utils {
       appData.runtime
     }.slice(lower, upper + 1)
   }
+
+  def stageFilter(stage: StageData): Boolean =  stage.jobId > 1 // stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
 }
