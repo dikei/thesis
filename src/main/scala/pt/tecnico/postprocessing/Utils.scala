@@ -28,7 +28,7 @@ object Utils {
 
   val blacklisted = Pattern.compile("master")
   val cpuPattern = Pattern.compile("cpu\\/percent-idle\\.rrd")
-  val diskPattern = Pattern.compile("disk-vdb\\/disk_io_time\\.rrd|disk-vda\\/disk_io_time\\.rrd")
+  val diskPattern = Pattern.compile("disk-vdb\\/disk_octets\\.rrd|disk-vda\\/disk_octets\\.rrd")
   val networkPattern = Pattern.compile("interface-eth0\\/if_octets\\.rrd")
   val loadPattern = Pattern.compile("load\\/load\\.rrd")
   val rrdParser = new RRDp(".", null)

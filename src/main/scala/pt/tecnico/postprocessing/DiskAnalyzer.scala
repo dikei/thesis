@@ -53,30 +53,34 @@ object DiskAnalyzer {
         }
         .map { line =>
           val tokens = line.split(":|\\s")
-          val ioTime = tokens(2).trim().toDouble
-          val weightedIoTime = tokens(3).trim().toDouble
+          val read = tokens(2).trim().toDouble
+          val write = tokens(3).trim().toDouble
           val time = tokens(0).toLong
-          (time * 1000, ioTime, weightedIoTime, file.getParentFile.getParentFile.getName, file.getParentFile.getName)
+          (time * 1000, read, write, file.getParentFile.getParentFile.getName, file.getParentFile.getName)
         }
     }
       .groupBy(t => t._1)
 
     val datasets = new ArrayBuffer[TimeSeriesCollection]()
-    val seriesMap = new scala.collection.mutable.HashMap[(String, String), TimeSeries]
+    val seriesMap = new scala.collection.mutable.HashMap[(String, String, String), TimeSeries]
 
     points.foreach { case (time, machineDisks) =>
-      val ioTimeTotal = new mutable.HashMap[String, Double]()
-      machineDisks.foreach { case (_, ioTime, weightedIoTime, machine, disk) =>
-        ioTimeTotal += disk -> (ioTime + ioTimeTotal.getOrElse(disk, 0.0))
-        seriesMap.getOrElseUpdate((machine, disk), new TimeSeries(s"$machine-$disk-IoTime"))
-          .add(new Second(new Date(time)), ioTime)
-        //          seriesMap.getOrElseUpdate(s"$machine-WeightedIoTime", new TimeSeries(s"$machine-WeightedIoTime"))
-        //            .add(new Second(new Date(time)), weightedIoTime)
+      val readTotal = new mutable.HashMap[String, Double]()
+      val writeTotal = new mutable.HashMap[String, Double]()
+      machineDisks.foreach { case (_, read, write, machine, disk) =>
+        readTotal += disk -> (read + readTotal.getOrElse(disk, 0.0))
+        writeTotal += disk -> (write + writeTotal.getOrElse(disk, 0.0))
+        seriesMap.getOrElseUpdate((machine, disk, "read"), new TimeSeries(s"$machine-$disk-Read"))
+          .add(new Second(new Date(time)), read)
+        seriesMap.getOrElseUpdate((machine, disk, "write"), new TimeSeries(s"$machine-$disk-Write"))
+          .add(new Second(new Date(time)), write)
       }
       if (average) {
         machineDisks.groupBy(_._5).foreach { case (disk, machines) =>
-          seriesMap.getOrElseUpdate(("Average", disk), new TimeSeries(s"Average IO Time - $disk"))
-            .add(new Second(new Date(time)), ioTimeTotal(disk) / machines.length)
+          seriesMap.getOrElseUpdate(("Average", disk, "read"), new TimeSeries(s"Average Read - $disk"))
+            .add(new Second(new Date(time)), readTotal(disk) / machines.length)
+          seriesMap.getOrElseUpdate(("Average", disk, "write"), new TimeSeries(s"Average Write - $disk"))
+            .add(new Second(new Date(time)), writeTotal(disk) / machines.length)
           //          val totalWeightedIoTime = machines.map(_._3).sum
           //          val averageWeightedIoTIme = totalWeightedIoTime / machines.length
           //          weightedIoTimeSeries.add(new Second(new Date(time)), averageWeightedIoTIme)
@@ -86,7 +90,7 @@ object DiskAnalyzer {
 
     seriesMap.groupBy(_._1._1).foreach { case (machine, map) =>
       val dataset = new TimeSeriesCollection()
-      map.foreach { case ((_, disk), series) =>
+      map.foreach { case ((_, _, _), series) =>
         dataset.addSeries(series)
       }
       datasets += dataset
