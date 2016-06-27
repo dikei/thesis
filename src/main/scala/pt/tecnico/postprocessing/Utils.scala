@@ -315,7 +315,7 @@ object Utils {
       }.reduce[Double] { case (f1: Double, f2: Double) =>
         f1 + f2
       }
-      totalLines / lines.length
+      totalLines
     } else {
       Double.NaN
     }
@@ -341,7 +341,7 @@ object Utils {
       }.reduce[Double] { case (f1: Double, f2: Double) =>
         f1 + f2
       }
-      totalLines / lines.length
+      totalLines
     } else {
       Double.NaN
     }

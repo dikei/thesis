@@ -1,12 +1,16 @@
 package pt.tecnico.postprocessing
 
-import java.io.File
+import java.io.{File, FileWriter}
 import java.util.Date
-import java.util.regex.Pattern
 
 import net.stamfest.rrd.RRDp
 import org.jfree.data.time.{Second, TimeSeries, TimeSeriesCollection}
-import pt.tecnico.spark.util.{AppData, StageData}
+import org.supercsv.cellprocessor.FmtNumber
+import org.supercsv.cellprocessor.constraint.NotNull
+import org.supercsv.cellprocessor.ift.CellProcessor
+import org.supercsv.io.CsvBeanWriter
+import org.supercsv.prefs.CsvPreference
+import pt.tecnico.spark.util.{AppData, StageData, NetworkStatistic}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -18,16 +22,134 @@ object NetworkAnalyzer {
   def main(args: Array[String]): Unit = {
     if (args.length < 2) {
       println("Usage: ")
-      println("java pt.tecnico.postprocessing.NetworkAnalyzer statsDir rrdDir")
+      println("java pt.tecnico.postprocessing.NetworkAnalyzer statsDir rrdDir csvFile")
       System.exit(-1)
     }
 
     val statsDir = args(0)
     val rrdDir = args(1)
-    val data = Utils.parseJsonInput(statsDir)
+    val data = Utils.parseJsonInput(statsDir, Some(Utils.stageFilter))
+
     // Plot network graph
     println("Plotting network graph")
     Utils.plotGraphJson(rrdDir, data, Utils.networkPattern, plotNetworkGraphPerRun, clusterAverage = true)
+
+    if (args.length > 2) {
+      networkUsagePerStage(Utils.trimRuns(data, 10), rrdDir, args(2))
+    }
+  }
+
+  def networkUsagePerStage(data: Seq[(AppData, Seq[StageData], String)], rrdDir: String, outFile: String): Unit = {
+    val startDir = new File(rrdDir)
+    val average = data.flatMap(run => run._2).groupBy(_.stageId)
+      .map { case (stageId, stages) =>
+        val validRuns = stages.filter(_.taskCount > 0).map { case (stageData: StageData) =>
+          val download = Utils.computeClusterAverage(
+            Utils.networkPattern,
+            startDir,
+            stageData.startTime,
+            stageData.completionTime,
+            Utils.computeDownloadNodeAverage
+          )
+          val upload = Utils.computeClusterAverage(
+            Utils.networkPattern,
+            startDir,
+            stageData.startTime,
+            stageData.completionTime,
+            Utils.computeUploadNodeAverage
+          )
+
+          val ret = new NetworkStatistic(
+            stageId,
+            stageData.name,
+            download,
+            upload)
+          (ret, 1)
+        }.filter { case (s, _) =>
+          !s.getDownload.isNaN && !s.getUpload.isNaN
+        }
+
+        val (total, count) = validRuns.reduce[(NetworkStatistic, Int)] {
+          case ((s1: NetworkStatistic, c1: Int), (s2: NetworkStatistic, c2: Int)) =>
+            val ret = new NetworkStatistic(
+              stageId,
+              s1.getStageName,
+              s1.getDownload + s2.getDownload,
+              s1.getUpload + s2.getUpload)
+            (ret, c1 + c2)
+        }
+
+        new NetworkStatistic(
+          stageId,
+          total.getStageName,
+          total.getDownload / count,
+          total.getUpload / count
+        )
+      }.toArray.sortBy(_.getStageId)
+
+    val validRuns = data.map(_._1).map { appData =>
+      val download = Utils.computeClusterAverage(
+        Utils.networkPattern,
+        startDir,
+        appData.start,
+        appData.end,
+        Utils.computeDownloadNodeAverage
+      )
+      val upload = Utils.computeClusterAverage(
+        Utils.networkPattern,
+        startDir,
+        appData.start,
+        appData.end,
+        Utils.computeUploadNodeAverage
+      )
+      val ret = new NetworkStatistic(
+        -1,
+        "App",
+        download,
+        upload)
+      (ret, 1)
+    }.filter { case (s, _) =>
+      !s.getDownload.isNaN && !s.getUpload.isNaN
+    }
+
+    val (total, count) = validRuns.reduce [(NetworkStatistic, Int)] {
+      case ((s1: NetworkStatistic, c1: Int), (s2: NetworkStatistic, c2: Int)) =>
+        val ret = new NetworkStatistic(
+          -1,
+          s1.getStageName,
+          s1.getDownload + s2.getDownload,
+          s1.getUpload + s2.getUpload)
+        (ret, c1 + c2)
+    }
+
+    val allStages = new NetworkStatistic(
+      -1,
+      total.getStageName,
+      total.getDownload / count,
+      total.getUpload / count
+    )
+
+    val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
+    val headers = Array (
+      "StageId", "StageName", "Download", "Upload"
+    )
+
+    val sizeFormatter = new FmtNumber("#,###")
+    val writeProcessors = Array[CellProcessor] (
+      new NotNull(),
+      new NotNull(),
+      sizeFormatter,
+      sizeFormatter
+    )
+    try {
+      writer.writeHeader(headers:_*)
+      average.foreach { stage =>
+        writer.write(stage, headers, writeProcessors)
+      }
+      writer.write(allStages, headers, writeProcessors)
+    } finally {
+      writer.close()
+    }
   }
 
   def plotNetworkGraphPerRun(
