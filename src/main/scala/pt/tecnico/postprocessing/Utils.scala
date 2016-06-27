@@ -28,7 +28,7 @@ object Utils {
 
   val blacklisted = Pattern.compile("master")
   val cpuPattern = Pattern.compile("cpu\\/percent-idle\\.rrd")
-  val diskPattern = Pattern.compile("disk-vdb\\/disk_octets\\.rrd|disk-vda\\/disk_octets\\.rrd")
+  val diskPattern = Pattern.compile("disk-vda\\/disk_octets\\.rrd")
   val networkPattern = Pattern.compile("interface-eth0\\/if_octets\\.rrd")
   val loadPattern = Pattern.compile("load\\/load\\.rrd")
   val rrdParser = new RRDp(".", null)
@@ -195,6 +195,54 @@ object Utils {
       total / validResult.length
     else
       Double.NaN
+  }
+
+  def computeDiskReadNodeAverage(rrdParser: RRDp, file: String, startTime: Long, endTime: Long): Double = {
+    val command = Array[String] (
+      "fetch", file, "AVERAGE",
+      "-s", (startTime / 1000).toString,
+      "-e", (endTime / 1000).toString
+    )
+    val rrdResult = rrdParser.command(command)
+    val lines = rrdResult.getOutput.trim.split("\n")
+      .filter { line =>
+        line.contains(":") && !line.contains("nan")
+      }
+    if (lines.length > 0) {
+      val totalLines = lines.map { line =>
+        val tokens = line.split(":|\\s")
+        tokens(2).trim().toDouble
+      }.reduce[Double] { case (f1: Double, f2: Double) =>
+        f1 + f2
+      }
+      totalLines
+    } else {
+      Double.NaN
+    }
+  }
+
+  def computeDiskWriteNodeAverage(rrdParser: RRDp, file: String, startTime: Long, endTime: Long): Double = {
+    val command = Array[String] (
+      "fetch", file, "AVERAGE",
+      "-s", (startTime / 1000).toString,
+      "-e", (endTime / 1000).toString
+    )
+    val rrdResult = rrdParser.command(command)
+    val lines = rrdResult.getOutput.trim.split("\n")
+      .filter { line =>
+        line.contains(":") && !line.contains("nan")
+      }
+    if (lines.length > 0) {
+      val totalLines = lines.map { line =>
+        val tokens = line.split(":|\\s")
+        tokens(3).trim().toDouble
+      }.reduce[Double] { case (f1: Double, f2: Double) =>
+        f1 + f2
+      }
+      totalLines
+    } else {
+      Double.NaN
+    }
   }
 
   def computeLoadNodeAverage(rrdParser: RRDp, file: String, startTime: Long, endTime: Long): Double = {
