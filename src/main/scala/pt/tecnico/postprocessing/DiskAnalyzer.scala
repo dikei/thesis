@@ -11,7 +11,7 @@ import org.supercsv.cellprocessor.constraint.NotNull
 import org.supercsv.cellprocessor.ift.CellProcessor
 import org.supercsv.io.CsvBeanWriter
 import org.supercsv.prefs.CsvPreference
-import pt.tecnico.spark.util.{AppData, StageData, StageDiskStatistic, StageRuntimeStatistic}
+import pt.tecnico.spark.util.{AppData, StageData, DiskStatistic, StageRuntimeStatistic}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -42,10 +42,10 @@ object DiskAnalyzer {
   }
 
   def diskUsagePerStage(data: Seq[(AppData, Seq[StageData], String)], rrdDir: String, outFile: String): Unit = {
+    val startDir = new File(rrdDir)
     val average = data.flatMap(run => run._2).groupBy(_.stageId)
       .map { case (stageId, stages) =>
         val validRuns = stages.filter(_.taskCount > 0).map { case (stageData: StageData) =>
-          val startDir = new File(rrdDir)
           val diskRead = Utils.computeClusterAverage(
             Utils.diskPattern,
             startDir,
@@ -61,7 +61,7 @@ object DiskAnalyzer {
             Utils.computeDiskWriteNodeAverage
           )
 
-          val ret = new StageDiskStatistic(
+          val ret = new DiskStatistic(
             stageId,
             stageData.name,
             diskRead,
@@ -71,9 +71,9 @@ object DiskAnalyzer {
           !s.getDiskRead.isNaN && !s.getDiskWrite.isNaN
         }
 
-        val (total, count) = validRuns.reduce[(StageDiskStatistic, Int)] {
-          case ((s1: StageDiskStatistic, c1: Int), (s2: StageDiskStatistic, c2: Int)) =>
-            val ret = new StageDiskStatistic(
+        val (total, count) = validRuns.reduce[(DiskStatistic, Int)] {
+          case ((s1: DiskStatistic, c1: Int), (s2: DiskStatistic, c2: Int)) =>
+            val ret = new DiskStatistic(
               stageId,
               s1.getStageName,
               s1.getDiskRead + s2.getDiskRead,
@@ -81,13 +81,55 @@ object DiskAnalyzer {
             (ret, c1 + c2)
         }
 
-        new StageDiskStatistic(
+        new DiskStatistic(
           stageId,
           total.getStageName,
           total.getDiskRead / count,
           total.getDiskWrite / count
         )
       }.toArray.sortBy(_.getStageId)
+
+    val validRuns = data.map { case (appData, _, _) =>
+      val diskRead = Utils.computeClusterAverage(
+        Utils.diskPattern,
+        startDir,
+        appData.start,
+        appData.end,
+        Utils.computeDiskReadNodeAverage
+      )
+      val diskWrite = Utils.computeClusterAverage(
+        Utils.diskPattern,
+        startDir,
+        appData.start,
+        appData.end,
+        Utils.computeDiskWriteNodeAverage
+      )
+
+      val ret = new DiskStatistic(
+        -1,
+        "App",
+        diskRead,
+        diskWrite)
+      (ret, 1)
+
+    }
+
+    val (total, count) = validRuns.reduce[(DiskStatistic, Int)] {
+      case ((s1: DiskStatistic, c1: Int), (s2: DiskStatistic, c2: Int)) =>
+        val ret = new DiskStatistic(
+          -1,
+          s1.getStageName,
+          s1.getDiskRead + s2.getDiskRead,
+          s1.getDiskWrite + s2.getDiskWrite)
+        (ret, c1 + c2)
+    }
+
+    val allStages = new DiskStatistic(
+      -1,
+      total.getStageName,
+      total.getDiskRead / count,
+      total.getDiskWrite / count
+    )
 
     val writer = new CsvBeanWriter(new FileWriter(outFile), CsvPreference.STANDARD_PREFERENCE)
     val headers = Array (
@@ -106,6 +148,7 @@ object DiskAnalyzer {
       average.foreach { stage =>
         writer.write(stage, headers, writeProcessors)
       }
+      writer.write(allStages, headers, writeProcessors)
     } finally {
       writer.close()
     }

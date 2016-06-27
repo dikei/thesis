@@ -1,15 +1,15 @@
 package pt.tecnico.spark.util;
 
 /**
- * Created by dikei on 6/26/16.
+ * Disk statistic
  */
-public class StageDiskStatistic {
+public class DiskStatistic {
     private Integer stageId;
     private String stageName;
     private Double diskRead;
     private Double diskWrite;
 
-    public StageDiskStatistic(Integer stageId, String stageName, Double diskRead, Double diskWrite) {
+    public DiskStatistic(Integer stageId, String stageName, Double diskRead, Double diskWrite) {
         this.stageId = stageId;
         this.stageName = stageName;
         this.diskRead = diskRead;
