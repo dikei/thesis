@@ -71,7 +71,7 @@ object Utils {
         if (!failureDetected) {
           Seq((appData, stages.toSeq, f.getAbsolutePath))
         } else {
-          Seq()
+          Seq.empty
         }
       } catch {
         case e: Exception =>
@@ -358,5 +358,5 @@ object Utils {
     }.slice(lower, upper + 1)
   }
 
-  def stageFilter(stage: StageData): Boolean =  stage.jobId > 1 // stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
+  def stageFilter(stage: StageData): Boolean =  stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
 }

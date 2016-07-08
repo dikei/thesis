@@ -42,8 +42,8 @@ object StageRuntimeComparer {
   }
 
   def plotStageGanttChartAverage(
-      barrierData: Seq[(Int, Seq[StageData])],
-      noBarrierData: Seq[(Int, Seq[StageData])],
+      barrierData: (Seq[(Int, Seq[StageData])], Long, Long),
+      noBarrierData: (Seq[(Int, Seq[StageData])], Long, Long),
       outputFile: String): Unit = {
 
 
@@ -59,8 +59,9 @@ object StageRuntimeComparer {
       new Color(99,99,99)
     )
 
-    var barrierEnd = -1L
-    barrierData.foreach { case (jobId, jobStages) =>
+
+    val barrierStagesData = barrierData._1
+    barrierStagesData.foreach { case (jobId, jobStages) =>
       val sortedStages = jobStages.sortBy(_.startTime)
       var startTime = java.lang.Long.MAX_VALUE
       var endTime = -1L
@@ -71,9 +72,6 @@ object StageRuntimeComparer {
         }
         if (endTime < stage.completionTime) {
           endTime = stage.completionTime
-        }
-        if (barrierEnd < stage.completionTime) {
-          barrierEnd = stage.completionTime
         }
         val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
         barrierSeries.add(task)
@@ -89,9 +87,8 @@ object StageRuntimeComparer {
       markers += jobMarker
     }
 
-    index = 0
-    var noBarrierEnd = -1L
-    noBarrierData.foreach { case (jobId, jobStages) =>
+    val noBarrierStageData = noBarrierData._1
+    noBarrierStageData.foreach { case (jobId, jobStages) =>
       val sortedStages = jobStages.sortBy(_.startTime)
       var startTime = java.lang.Long.MAX_VALUE
       var endTime = -1L
@@ -103,21 +100,9 @@ object StageRuntimeComparer {
         if (endTime < stage.completionTime) {
           endTime = stage.completionTime
         }
-        if (noBarrierEnd < stage.completionTime) {
-          noBarrierEnd = stage.completionTime
-        }
         val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
         noBarrierSeries.add(task)
       }
-//      val jobMarker = new IntervalMarker(startTime, endTime)
-//      jobMarker.setLabel(jobId.toString)
-//      jobMarker.setAlpha(0.2f)
-//      jobMarker.setLabelFont(jobFont)
-//      jobMarker.setLabelAnchor(RectangleAnchor.TOP)
-//      jobMarker.setLabelOffset(new RectangleInsets(20, 0, 0, 0))
-//      jobMarker.setPaint(jobBackgrounds(index % jobBackgrounds.length))
-//      index += 1
-//      markers += jobMarker
     }
 
     collection.add(barrierSeries)
@@ -128,7 +113,7 @@ object StageRuntimeComparer {
     timeAxis.setDateFormatOverride(dateFormat)
     timeAxis.setAutoRange(true)
 
-    timeAxis.setRange(new Date(0), new Date(Math.max(barrierEnd, noBarrierEnd)))
+    timeAxis.setRange(new Date(0), new Date(Math.max(barrierData._2, noBarrierData._2)))
     timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 10))
     timeAxis.setMinorTickMarksVisible(true)
     timeAxis.setMinorTickCount(2)
@@ -148,16 +133,23 @@ object StageRuntimeComparer {
       plot.addRangeMarker(marker)
     }
     val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
-    chart.addSubtitle(new TextTitle(s"Barrier time: ${barrierEnd / 1000} "))
-    chart.addSubtitle(new TextTitle(s"No barrier time: ${noBarrierEnd / 1000}"))
+    val barrierDuration = barrierData._2
+    val barrierStdDev = barrierData._3
+    val noBarrierDuration = noBarrierData._2
+    val noBarrierStdDev = noBarrierData._3
+    val improvement = (barrierDuration - noBarrierDuration).toDouble * 100/ barrierDuration
+    chart.addSubtitle(new TextTitle(s"Barrier: Avgtime: $barrierDuration, StdDev: $barrierStdDev "))
+    chart.addSubtitle(new TextTitle(s"No barrier: Avgtime: $noBarrierDuration, StdDev: $noBarrierStdDev "))
+    chart.addSubtitle(new TextTitle(s"Improvement: $improvement %"))
     val output = new File(outputFile)
     val width = 1280 * 2
     val height = 960
     ChartUtilities.saveChartAsPNG(output, chart, width, height)
   }
 
-  def computeAverageStageData(data: Seq[(AppData, Seq[StageData], String)]): Seq[(Int, Seq[StageData])] = {
+  def computeAverageStageData(data: Seq[(AppData, Seq[StageData], String)]): (Seq[(Int, Seq[StageData])], Long, Long) = {
     val stageBuffer = mutable.HashMap[Int, mutable.HashMap[Int, mutable.Buffer[StageData]]]()
+    val durations = mutable.Buffer[Long]()
     data.foreach { case (appData, stages, _) =>
       stages.groupBy(_.jobId).toList.sortBy(_._1).foreach { case (jobId, jobStages) =>
         val stages = stageBuffer.getOrElseUpdate(jobId, mutable.HashMap[Int, mutable.Buffer[StageData]]())
@@ -168,8 +160,10 @@ object StageRuntimeComparer {
           stages.getOrElseUpdate(stage.stageId, mutable.Buffer[StageData]()) += tmp
         }
       }
+      durations += appData.runtime
     }
-    stageBuffer.mapValues { stagesByIds =>
+
+    val stagesData = stageBuffer.mapValues { stagesByIds =>
       stagesByIds.map { case (id, stages) =>
         val avgStart = stages.map(_.startTime).sum / stages.length
         val avgCompletion = stages.map(_.completionTime).sum / stages.length
@@ -180,5 +174,12 @@ object StageRuntimeComparer {
         ret
       }.toSeq
     }.toSeq.sortBy(_._1)
+    val averageDuration = durations.sum / durations.length
+    var variance = 0.0
+    durations.foreach { d =>
+      variance += Math.pow(d.toDouble - averageDuration, 2)
+    }
+    val stdDev = Math.sqrt(variance).toLong
+    (stagesData, averageDuration, stdDev)
   }
 }

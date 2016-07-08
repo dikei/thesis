@@ -110,10 +110,10 @@ object TotalRuntimeAnalyzer {
     renderer.setBarPainter(new StandardXYBarPainter())
     renderer.setShadowVisible(false)
 
-    chart.addSubtitle(new TextTitle(s"Average time: $averageInSecond s"))
-    chart.addSubtitle(new TextTitle(s"Standard deviation: ${standardDeviation / 1000} s"))
-    chart.addSubtitle(new TextTitle(s"Best time: ${bestRuntime / 1000} s"))
-    chart.addSubtitle(new TextTitle(s"Worse time: ${worseRuntime / 1000} s"))
+    chart.addSubtitle(new TextTitle(s"Average time: $averageRuntime ms"))
+    chart.addSubtitle(new TextTitle(s"Standard deviation: $standardDeviation ms"))
+    chart.addSubtitle(new TextTitle(s"Best time: $bestRuntime ms"))
+    chart.addSubtitle(new TextTitle(s"Worse time: $worseRuntime ms"))
     val width = 1280
     val height = 960
 
