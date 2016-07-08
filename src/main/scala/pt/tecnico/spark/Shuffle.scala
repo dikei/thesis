@@ -34,7 +34,7 @@ object Shuffle {
     val initialCount = initialRDD.count()
 
     // Warm up JIT
-    doShuffle(iteration, initialRDD, partitionCount)
+//    doShuffle(iteration, initialRDD, partitionCount)
 
     // Second shuffle to interference
     val linesCount: Long = doShuffle(iteration, initialRDD, partitionCount)
