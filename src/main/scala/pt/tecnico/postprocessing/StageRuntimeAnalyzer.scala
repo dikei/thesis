@@ -150,7 +150,9 @@ object StageRuntimeAnalyzer {
         markers += jobMarker
       }
       collection.add(stageSeries)
-      executorSeries.values.foreach(collection.add)
+      executorSeries.toSeq.sortBy(_._1).foreach { case (_, series) =>
+        collection.add(series)
+      }
       val dateFormat = new RelativeSecondFormat(appData.start)
       val timeAxis = new CustomDateAxis("Time")
       timeAxis.setLowerBound(0)
