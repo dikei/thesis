@@ -28,7 +28,7 @@ object Shuffle {
     val sc = new SparkContext(conf)
     sc.addSparkListener(new StageRuntimeReportListener(statsDir))
 
-    val initialRDD = sc.textFile(input).repartition(partitionCount).cache()
+    val initialRDD = sc.textFile(input).repartition(partitionCount)
 
     // Force-load the file into memory to avoid the variant in reading speed from HDFS
     val initialCount = initialRDD.count()
