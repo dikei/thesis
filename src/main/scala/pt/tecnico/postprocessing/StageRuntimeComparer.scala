@@ -147,7 +147,8 @@ object StageRuntimeComparer {
     ChartUtilities.saveChartAsPNG(output, chart, width, height)
   }
 
-  def computeAverageStageData(data: Seq[(AppData, Seq[StageData], String)]): (Seq[(Int, Seq[StageData])], Long, Long) = {
+  def computeAverageStageData(data: Seq[(AppData, Seq[StageData], String)]):
+      (Seq[(Int, Seq[StageData])], Long, Long) = {
     val stageBuffer = mutable.HashMap[Int, mutable.HashMap[Int, mutable.Buffer[StageData]]]()
     val durations = mutable.Buffer[Long]()
     data.foreach { case (appData, stages, _) =>
