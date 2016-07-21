@@ -70,3 +70,6 @@ spark-assembly-1.6.0-hadoop2.2.0.jar
 *.tar.gz
 *.tar.xz
 /*.sh
+/old
+/stats
+/thesis
