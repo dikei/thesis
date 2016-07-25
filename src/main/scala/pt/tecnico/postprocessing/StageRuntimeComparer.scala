@@ -180,6 +180,7 @@ object StageRuntimeComparer {
     durations.foreach { d =>
       variance += Math.pow(d.toDouble - averageDuration, 2)
     }
+    variance = variance / durations.length
     val stdDev = Math.sqrt(variance).toLong
     (stagesData, averageDuration, stdDev)
   }

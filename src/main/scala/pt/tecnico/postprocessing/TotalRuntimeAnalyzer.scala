@@ -82,6 +82,8 @@ object TotalRuntimeAnalyzer {
       variance += Math.pow(runtime - averageRuntime, 2)
       dataset.addObservation(runtime / 1000)
     }
+    variance = variance / appRuntimes.length
+
     val standardDeviation = Math.round(Math.sqrt(variance))
 
     dataset.setAdjustForBinSize(false)
