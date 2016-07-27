@@ -8,6 +8,7 @@ javacOptions ++= Seq("-source", "1.7", "-target", "1.7")
 scalacOptions += "-target:jvm-1.7"
 
 libraryDependencies ++= Seq(
+  "org.apache.commons" % "commons-math3" % "3.6.1",
   "com.google.guava" % "guava" % "19.0",
   "org.apache.spark" % "spark-core_2.10" % "1.6.2-SNAPSHOT" % "provided",
   "org.apache.spark" % "spark-mllib_2.10" % "1.6.2-SNAPSHOT" % "provided",

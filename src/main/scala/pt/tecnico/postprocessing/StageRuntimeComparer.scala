@@ -4,17 +4,52 @@ import java.awt.{Color, Font}
 import java.io.File
 import java.util.Date
 
-import org.jfree.chart.{ChartUtilities, JFreeChart}
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.apache.commons.math3.distribution.TDistribution
+import org.apache.commons.math3.stat.inference.TTest
 import org.jfree.chart.axis.{CategoryAxis, DateTickUnit, DateTickUnitType}
 import org.jfree.chart.plot.{CategoryPlot, IntervalMarker, PlotOrientation}
 import org.jfree.chart.renderer.category.StandardBarPainter
 import org.jfree.chart.title.TextTitle
+import org.jfree.chart.{ChartUtilities, JFreeChart}
 import org.jfree.data.gantt.{Task, TaskSeries, TaskSeriesCollection}
 import org.jfree.data.time.SimpleTimePeriod
 import org.jfree.ui.{RectangleAnchor, RectangleInsets}
 import pt.tecnico.spark.util.{AppData, StageData}
 
-import scala.collection.{Map, mutable}
+import scala.collection.mutable
+
+case class RuntimeStatistic(stats: DescriptiveStatistics) {
+  lazy val (lower, upper) = calculateCI
+  def avg = stats.getMean.round
+  def median = stats.getPercentile(50).round
+  def percent90 = stats.getPercentile(90).round
+  def stdDev = stats.getStandardDeviation.round
+  def samples = stats.getN
+  def variance = stats.getVariance
+
+  def calculateCI : (Double, Double) = {
+    // Calculate 95% confident interval using Student t's distribution
+    val tDist = new TDistribution(stats.getN - 1)
+    val criticalValue = tDist.inverseCumulativeProbability(1.0 - 0.05 / 2)
+    val ci = criticalValue * stats.getStandardDeviation / Math.sqrt(stats.getN)
+
+    ((avg - ci).round, (avg + ci).round)
+  }
+
+  def sse : Double = {
+    var ret = 0.0
+    (0 until samples.toInt).foreach { i =>
+      ret += Math.pow(stats.getElement(i) - stats.getMean, 2)
+    }
+    ret
+  }
+
+  override def toString: String = {
+    s"Avg: $avg,    Median: $median,    90-th Percentile: $percent90,    StdDev: $stdDev,    Samples: $samples    " +
+    s"95% Confidence Interval: $lower - $upper"
+  }
+}
 
 /**
   * Created by dikei on 6/17/16.
@@ -42,8 +77,8 @@ object StageRuntimeComparer {
   }
 
   def plotStageGanttChartAverage(
-      barrierData: (Seq[(Int, Seq[StageData])], Long, Long),
-      noBarrierData: (Seq[(Int, Seq[StageData])], Long, Long),
+      barrierData: (Seq[(Int, Seq[StageData])], RuntimeStatistic),
+      noBarrierData: (Seq[(Int, Seq[StageData])], RuntimeStatistic),
       outputFile: String): Unit = {
 
 
@@ -113,7 +148,7 @@ object StageRuntimeComparer {
     timeAxis.setDateFormatOverride(dateFormat)
     timeAxis.setAutoRange(true)
 
-    timeAxis.setRange(new Date(0), new Date(Math.max(barrierData._2, noBarrierData._2)))
+    timeAxis.setRange(new Date(0), new Date(Math.max(barrierData._2.avg, noBarrierData._2.avg)))
     timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 10))
     timeAxis.setMinorTickMarksVisible(true)
     timeAxis.setMinorTickCount(2)
@@ -133,14 +168,45 @@ object StageRuntimeComparer {
       plot.addRangeMarker(marker)
     }
     val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
-    val barrierDuration = barrierData._2
-    val barrierStdDev = barrierData._3
-    val noBarrierDuration = noBarrierData._2
-    val noBarrierStdDev = noBarrierData._3
-    val improvement = (barrierDuration - noBarrierDuration).toDouble * 100/ barrierDuration
-    chart.addSubtitle(new TextTitle(s"Barrier: Avgtime: $barrierDuration, StdDev: $barrierStdDev "))
-    chart.addSubtitle(new TextTitle(s"No barrier: Avgtime: $noBarrierDuration, StdDev: $noBarrierStdDev "))
-    chart.addSubtitle(new TextTitle(s"Improvement: $improvement %"))
+
+    val barrierStats = barrierData._2
+    val noBarrierStats = noBarrierData._2
+
+    val barrierTitle = new TextTitle(barrierStats.toString)
+    barrierTitle.setPaint(Color.RED)
+    barrierTitle.getHeight
+    chart.addSubtitle(barrierTitle)
+
+    val noBarrierTitle = new TextTitle(noBarrierStats.toString)
+    noBarrierTitle.setPaint(Color.BLUE)
+    chart.addSubtitle(noBarrierTitle)
+
+    val tTest = new TTest
+    val pValue = tTest.tTest(noBarrierStats.stats, barrierStats.stats)
+    println(s"P: $pValue")
+
+    // Test if we can reject barrier = barrier with confident interval 0.95
+    val significant = tTest.tTest(noBarrierStats.stats, barrierStats.stats, 0.05)
+
+    val meanDiff = (barrierStats.avg - noBarrierStats.avg).toDouble
+    val sse = barrierStats.sse + noBarrierStats.sse
+    val df =  degreeOfFreedom(barrierStats.variance, barrierStats.samples, noBarrierStats.variance, noBarrierStats.samples)
+    val mse = sse / df
+    val harmonicN = barrierStats.samples * noBarrierStats.samples / barrierStats.samples + noBarrierStats.samples
+    val S = Math.sqrt(mse * 2 / harmonicN)
+    val criticalValue = new TDistribution(df).inverseCumulativeProbability(1 - 0.05 / 2)
+    println(s"DF: $df, T: $criticalValue")
+
+    val (meanLower, meanUpper) = (meanDiff - criticalValue * S, meanDiff + criticalValue * S)
+
+    chart.addSubtitle(new TextTitle(s"Significant: %s, improvement: %.2f %%, 95%% Confident interval: %.2f %% - %.2f %%"
+      .format(
+        significant,
+        meanDiff * 100 / barrierStats.avg,
+        meanLower * 100/ barrierStats.avg,
+        meanUpper * 100/ barrierStats.avg)
+    ))
+
     val output = new File(outputFile)
     val width = 1280 * 2
     val height = 960
@@ -148,9 +214,9 @@ object StageRuntimeComparer {
   }
 
   def computeAverageStageData(data: Seq[(AppData, Seq[StageData], String)]):
-      (Seq[(Int, Seq[StageData])], Long, Long) = {
+      (Seq[(Int, Seq[StageData])], RuntimeStatistic) = {
     val stageBuffer = mutable.HashMap[Int, mutable.HashMap[Int, mutable.Buffer[StageData]]]()
-    val durations = mutable.Buffer[Long]()
+    val stats = new DescriptiveStatistics
     data.foreach { case (appData, stages, _) =>
       stages.groupBy(_.jobId).toList.sortBy(_._1).foreach { case (jobId, jobStages) =>
         val stages = stageBuffer.getOrElseUpdate(jobId, mutable.HashMap[Int, mutable.Buffer[StageData]]())
@@ -161,7 +227,7 @@ object StageRuntimeComparer {
           stages.getOrElseUpdate(stage.stageId, mutable.Buffer[StageData]()) += tmp
         }
       }
-      durations += appData.runtime
+      stats.addValue(appData.runtime)
     }
 
     val stagesData = stageBuffer.mapValues { stagesByIds =>
@@ -175,13 +241,12 @@ object StageRuntimeComparer {
         ret
       }.toSeq
     }.toSeq.sortBy(_._1)
-    val averageDuration = durations.sum / durations.length
-    var variance = 0.0
-    durations.foreach { d =>
-      variance += Math.pow(d.toDouble - averageDuration, 2)
-    }
-    variance = variance / durations.length
-    val stdDev = Math.sqrt(variance).toLong
-    (stagesData, averageDuration, stdDev)
+
+    (stagesData, RuntimeStatistic(stats))
+  }
+
+  def degreeOfFreedom(v1: Double, n1: Long, v2: Double, n2: Long): Double = {
+    (((v1 / n1) + (v2 / n2)) * ((v1 / n1) + (v2 / n2))) /
+      ((v1 * v1) / (n1 * n1 * (n1 - 1d)) + (v2 * v2) / (n2 * n2 * (n2 - 1d)))
   }
 }
