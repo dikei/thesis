@@ -17,7 +17,8 @@ libraryDependencies ++= Seq(
   "org.json4s" %% "json4s-ext" % "3.3.0",
   "net.sf.supercsv" % "super-csv" % "2.4.0",
   "org.jfree" % "jfreechart" % "1.0.19",
-  "org.projectlombok" % "lombok" % "1.16.10" %"provided"
+  "org.projectlombok" % "lombok" % "1.16.10" % "provided",
+  "com.itextpdf" % "itextpdf" % "5.5.9"
 )
 
 assemblyJarName in assembly := s"${name.value}-assembly-${version.value}.jar"

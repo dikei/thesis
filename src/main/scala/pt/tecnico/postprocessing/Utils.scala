@@ -1,11 +1,15 @@
 package pt.tecnico.postprocessing
 
+import java.awt.geom.Rectangle2D
 import java.awt.{Color, Font}
-import java.io.File
+import java.io.{File, FileOutputStream}
 import java.util.Date
 import java.util.regex.Pattern
 
 import com.google.common.io.PatternFilenameFilter
+import com.itextpdf.awt.PdfGraphics2D
+import com.itextpdf.text.pdf.PdfWriter
+import com.itextpdf.text.{Document, Rectangle}
 import net.stamfest.rrd.RRDp
 import org.jfree.chart.{ChartUtilities, JFreeChart}
 import org.jfree.chart.axis.{DateAxis, NumberAxis}
@@ -359,4 +363,33 @@ object Utils {
   }
 
   def stageFilter(stage: StageData): Boolean =  stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
+
+  def saveChartAsPDF(output: File, chart: JFreeChart, width: Int, height: Int): Unit = {
+    val pagesize = new Rectangle(width, height)
+    val doc = new Document(pagesize, 0, 0, 0, 0)
+    val outputStream = try {
+      Some(new FileOutputStream(output))
+    } catch {
+      case _:Throwable => None
+    }
+
+    outputStream.foreach { stream =>
+      val writer = try {
+        Some(PdfWriter.getInstance(doc, stream))
+      } catch {
+        case _:Throwable => None
+      }
+      writer.foreach { pdfWriter =>
+        doc.open()
+        val content = pdfWriter.getDirectContent
+        val graphic = new PdfGraphics2D(content, width, height)
+        val area = new Rectangle2D.Double(0, 0, width, height)
+        chart.draw(graphic, area)
+        graphic.dispose()
+        doc.close()
+        pdfWriter.close()
+      }
+      stream.close()
+    }
+  }
 }

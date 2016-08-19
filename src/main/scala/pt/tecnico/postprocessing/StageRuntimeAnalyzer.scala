@@ -177,10 +177,10 @@ object StageRuntimeAnalyzer {
         plot.addRangeMarker(marker)
       }
       val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
-      val output = new File( s"$outputPrefix-stages.png" )
+      val output = new File( s"$outputPrefix-stages.pdf" )
       val width = 1280 * 2
       val height = 960
-      ChartUtilities.saveChartAsPNG(output, chart, width, height)
+      Utils.saveChartAsPDF(output, chart, width, height)
     }
   }
 
