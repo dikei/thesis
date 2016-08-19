@@ -11,3 +11,5 @@ rm -rf thesis
 
 echo "Upload to gateway"
 scp thesis.tar.gz ktruong@cloudtm.ist.utl.pt:/home/ktruong/nas/cloudtm/thesis.tar.gz
+
+rm thesis.tar.gz
