@@ -1,8 +1,9 @@
 package pt.tecnico.spark.graph
 
-import org.apache.spark.graphx.{GraphXUtils}
+import org.apache.spark.graphx.{GraphXUtils, PartitionStrategy}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.graphx.util.GraphGenerators
+import org.apache.spark.storage.StorageLevel
 
 /**
   * Created by dikei on 2/12/16.
@@ -31,6 +32,7 @@ object GraphGen {
 
     val graph = GraphGenerators
       .logNormalGraph(sc, noVertices, seed = randomSeed, numEParts = noPartition)
+      .partitionBy(PartitionStrategy.RandomVertexCut)
 
     graph.edges.map { edge =>
       edge.srcId + " " + edge.dstId
