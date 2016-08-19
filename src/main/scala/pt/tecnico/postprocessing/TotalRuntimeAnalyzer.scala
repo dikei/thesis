@@ -1,15 +1,22 @@
 package pt.tecnico.postprocessing
 
-import java.awt.Color
-import java.io.File
+import java.awt.Font
+import java.io.{File, FileWriter}
 
-import org.jfree.chart.{ChartFactory, ChartUtilities}
-import org.jfree.chart.axis.NumberAxis
-import org.jfree.chart.plot.PlotOrientation
-import org.jfree.chart.renderer.xy.{StandardXYBarPainter, XYBarRenderer}
-import org.jfree.chart.title.TextTitle
-import org.jfree.data.statistics.{SimpleHistogramBin, SimpleHistogramDataset}
-import pt.tecnico.spark.util.{AppData, StageData}
+import org.apache.commons.math3.distribution.TDistribution
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
+import org.apache.commons.math3.stat.inference.TTest
+import org.jfree.chart.axis.{CategoryAxis, NumberAxis}
+import org.jfree.chart.plot.CategoryPlot
+import org.jfree.chart.renderer.category.StatisticalBarRenderer
+import org.jfree.chart.{ChartUtilities, JFreeChart}
+import org.jfree.data.statistics.DefaultStatisticalCategoryDataset
+import org.supercsv.cellprocessor.FmtNumber
+import org.supercsv.cellprocessor.constraint.NotNull
+import org.supercsv.cellprocessor.ift.CellProcessor
+import org.supercsv.io.CsvBeanWriter
+import org.supercsv.prefs.CsvPreference
+import pt.tecnico.spark.util.{AppData, AppRuntimeStatistic, StageData}
 
 
 /**
@@ -20,105 +27,150 @@ object TotalRuntimeAnalyzer {
   def main(args: Array[String]): Unit = {
     if (args.length < 2) {
       println("Usage: ")
-      println("java pt.tecnico.postprocessing.TotalRuntimeAnalyzer statsDir output")
+      println("java pt.tecnico.postprocessing.TotalRuntimeAnalyzer barrierDir noBarrierDir output")
       System.exit(-1)
     }
 
-    val statsDir = args(0)
-    val output = args(1)
-    val data = Utils.parseJsonInput(statsDir, Some(Utils.stageFilter))
+    val barrierDirs = new File(args(0)).listFiles.filter(_.isDirectory)
+    val noBarrierDirs = new File(args(1)).listFiles.filter(_.isDirectory)
+    val output = args(2)
 
-    println("Plotting runtime distribution")
-    plotRuntimeDistribution(Utils.trimRuns(data, 10), output)
+    val barrierDatas = barrierDirs.map { dir =>
+      (dir.getName, Utils.trimRuns(Utils.parseJsonInput(dir.getAbsolutePath, Some(Utils.stageFilter)), 10))
+    }.toMap
+    val noBarrierDatas = noBarrierDirs.map { dir =>
+      (dir.getName, Utils.trimRuns(Utils.parseJsonInput(dir.getAbsolutePath, Some(Utils.stageFilter)), 10))
+    }.toMap
+
+//    println("Plotting runtime distribution")
+//    plotExecutionTime(barrierDatas, noBarrierDatas, output)
+
+    println("Dumping statistic")
+    dumpExecutionStatistic(barrierDatas, noBarrierDatas, output)
   }
 
+  def plotExecutionTime(
+      barrierDatas: Map[String, Seq[(AppData, Seq[StageData], String)]],
+      noBarrierDatas: Map[String, Seq[(AppData, Seq[StageData], String)]],
+      outputFile: String): Unit = {
 
+    val dataset = new DefaultStatisticalCategoryDataset
+    barrierDatas.filterKeys(k => noBarrierDatas.contains(k)).toSeq.sortBy(_._1).
+      foreach { case (name, barrierData) =>
+        val barrierStatistic = new DescriptiveStatistics
+        barrierData.foreach { case (appData, _, _) =>
+          barrierStatistic.addValue(appData.runtime)
+        }
 
-  def plotRuntimeDistribution(runs: Seq[(AppData, Seq[StageData], String)], output: String): Unit = {
-    var variance: Double = 0
-    var totalRuntimes: Long = 0
-    var bestRuntime = Long.MaxValue
-    var worseRuntime = Long.MinValue
-    val appRuntimes = runs.map { case (appData, _, _) =>
-      totalRuntimes += appData.runtime
-      if (bestRuntime > appData.runtime) {
-        bestRuntime = appData.runtime
+        val noBarrierStatistic = new DescriptiveStatistics
+        val noBarrierData = noBarrierDatas(name)
+        noBarrierData.foreach { case (appData, _, _) =>
+          noBarrierStatistic.addValue(appData.runtime)
+        }
+        println(s"$name: ${barrierStatistic.getMean}, ${barrierStatistic.getStandardDeviation}")
+        println(s"$name: ${noBarrierStatistic.getMean}, ${noBarrierStatistic.getStandardDeviation}")
+        dataset.add(barrierStatistic.getMean, barrierStatistic.getStandardDeviation, "Barrier", name)
+        dataset.add(noBarrierStatistic.getMean, noBarrierStatistic.getStandardDeviation, "NoBarrier", name)
       }
-      if (worseRuntime < appData.runtime) {
-        worseRuntime = appData.runtime
+
+    val xAxis = new CategoryAxis("Input size")
+    xAxis.setLowerMargin(0.02d) // percentage of space before first bar
+    xAxis.setUpperMargin(0.02d) // percentage of space after last bar
+    xAxis.setCategoryMargin(0.1d) // percentage of space between categories
+    val yAxis = new NumberAxis("Time")
+    yAxis.setAutoRange(true)
+
+    // define the plot
+    val renderer = new StatisticalBarRenderer()
+    val plot = new CategoryPlot(dataset, xAxis, yAxis, renderer)
+
+    val chart = new JFreeChart("Statistical Bar Chart Demo",
+      new Font("Helvetica", Font.BOLD, 14),
+      plot,
+      true)
+
+    val output = new File(outputFile)
+    val width = 1280 * 2
+    val height = 960 * 4
+    ChartUtilities.saveChartAsPNG(output, chart, width, height)
+  }
+
+  def dumpExecutionStatistic(
+      barrierDatas: Map[String, Seq[(AppData, Seq[StageData], String)]],
+      noBarrierDatas: Map[String, Seq[(AppData, Seq[StageData], String)]],
+      outputFile: String): Unit = {
+    val appRuntimeCompare = barrierDatas.filterKeys(k => noBarrierDatas.contains(k)).toSeq.sortBy(_._1).
+      map { case (name, barrierData) =>
+        val barrierStatistic = new DescriptiveStatistics
+        barrierData.foreach { case (appData, _, _) =>
+          barrierStatistic.addValue(appData.runtime)
+        }
+
+        val noBarrierStatistic = new DescriptiveStatistics
+        val noBarrierData = noBarrierDatas(name)
+        noBarrierData.foreach { case (appData, _, _) =>
+          noBarrierStatistic.addValue(appData.runtime)
+        }
+
+        val barrierStats = RuntimeStatistic(barrierStatistic)
+        val noBarrierStats = RuntimeStatistic(noBarrierStatistic)
+
+        val tTest = new TTest
+        val pValue = tTest.tTest(noBarrierStats.stats, barrierStats.stats)
+
+        // Test if we can reject no barrier = barrier with confident interval 0.95
+        val significant = tTest.tTest(noBarrierStats.stats, barrierStats.stats, 0.05)
+
+        val meanDiff = (barrierStats.avg - noBarrierStats.avg).toDouble
+        val sse = barrierStats.sse + noBarrierStats.sse
+        val df =  degreeOfFreedom(barrierStats.variance, barrierStats.samples, noBarrierStats.variance, noBarrierStats.samples)
+        val mse = sse / df
+        val harmonicN = barrierStats.samples * noBarrierStats.samples / barrierStats.samples + noBarrierStats.samples
+        val S = Math.sqrt(mse * 2 / harmonicN)
+        val criticalValue = new TDistribution(df).inverseCumulativeProbability(1 - 0.05 / 2)
+        val (meanDiffLower, meanDiffUpper) = (meanDiff - criticalValue * S, meanDiff + criticalValue * S)
+
+        val speedup = meanDiff * 100 / barrierStats.avg
+        val speedupLower = meanDiffLower * 100 / barrierStats.avg
+        val speedupUpper = meanDiffUpper * 100 / barrierStats.avg
+
+        new AppRuntimeStatistic(
+          name,
+          barrierStats.avg, barrierStats.lower, barrierStats.upper, barrierStats.stdDev, barrierStats.samples,
+          noBarrierStats.avg, noBarrierStats.lower, noBarrierStats.upper, noBarrierStats.stdDev, noBarrierStats.samples,
+          significant,
+          speedup, speedupLower, speedupUpper)
       }
-      appData.runtime
-    }
-    val averageRuntime = totalRuntimes / appRuntimes.length
 
-    println(s"Average runtime: $averageRuntime")
-    println(s"Best runtime: $bestRuntime")
-    println(s"Worse runtime: $worseRuntime")
-
-    val dataset = new SimpleHistogramDataset("Runtime")
-    var binCount = 0
-    val binsize = 10
-    val averageInSecond = averageRuntime / 1000
-    while(averageInSecond - binsize * binCount >= bestRuntime / 1000 ||
-      averageInSecond + binsize * binCount <= worseRuntime / 1000) {
-      dataset.addBin(
-        new SimpleHistogramBin(
-          averageInSecond - binsize * (binCount + 1),
-          averageInSecond - binsize * binCount,
-          true,
-          false)
-      )
-      dataset.addBin(
-        new SimpleHistogramBin(
-          averageInSecond + binsize * binCount,
-          averageInSecond + binsize * (binCount + 1),
-          true,
-          false)
-      )
-      binCount += 1
-    }
-
-    appRuntimes.foreach { runtime =>
-      variance += Math.pow(runtime - averageRuntime, 2)
-      dataset.addObservation(runtime / 1000)
-    }
-    variance = variance / appRuntimes.length
-
-    val standardDeviation = Math.round(Math.sqrt(variance))
-
-    dataset.setAdjustForBinSize(false)
-    val chart = ChartFactory.createHistogram(
-      "Execution time graph",
-      "Execution Time",
-      "Count",
-      dataset,
-      PlotOrientation.VERTICAL,
-      false,
-      false,
-      false
+    val writer = new CsvBeanWriter(new FileWriter(outputFile), CsvPreference.STANDARD_PREFERENCE)
+    val headers = Array (
+      "Name",
+      "Barrier", "BarrierLower", "BarrierUpper", "BarrierStdDev", "BarrierSample",
+      "NoBarrier", "NoBarrierLower", "NoBarrierUpper", "NoBarrierStdDev", "NoBarrierSample",
+      "SignificantDifferent",
+      "SpeedUp", "SpeedUpLower", "SpeedUpUpper"
     )
 
-    val plot = chart.getXYPlot
-    plot.setBackgroundPaint(Color.white)
-    plot.setDomainGridlinePaint(Color.lightGray)
-    plot.setRangeGridlinePaint(Color.lightGray)
-    val yAxis = plot.getRangeAxis
-    yAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits())
-    val xAxis = plot.getDomainAxis
-    xAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits())
+    val numFormatter = new FmtNumber("#.##")
+    val writeProcessors = Array[CellProcessor] (
+      new NotNull(),
+      numFormatter, numFormatter, numFormatter, numFormatter, numFormatter,
+      numFormatter, numFormatter, numFormatter, numFormatter, numFormatter,
+      new NotNull(),
+      numFormatter, numFormatter, numFormatter
+    )
+    try {
+      writer.writeHeader(headers:_*)
+      appRuntimeCompare.foreach { row =>
+        writer.write(row, headers, writeProcessors)
+      }
+    } finally {
+      writer.close()
+    }
+  }
 
-    val renderer = plot.getRenderer.asInstanceOf[XYBarRenderer]
-    renderer.setDrawBarOutline(true)
-    renderer.setBarPainter(new StandardXYBarPainter())
-    renderer.setShadowVisible(false)
-
-    chart.addSubtitle(new TextTitle(s"Average time: $averageRuntime ms"))
-    chart.addSubtitle(new TextTitle(s"Standard deviation: $standardDeviation ms"))
-    chart.addSubtitle(new TextTitle(s"Best time: $bestRuntime ms"))
-    chart.addSubtitle(new TextTitle(s"Worse time: $worseRuntime ms"))
-    val width = 1280
-    val height = 960
-
-    ChartUtilities.saveChartAsPNG(new File(output), chart, width, height)
+  def degreeOfFreedom(v1: Double, n1: Long, v2: Double, n2: Long): Double = {
+    (((v1 / n1) + (v2 / n2)) * ((v1 / n1) + (v2 / n2))) /
+      ((v1 * v1) / (n1 * n1 * (n1 - 1d)) + (v2 * v2) / (n2 * n2 * (n2 - 1d)))
   }
 }

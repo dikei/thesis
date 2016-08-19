@@ -21,10 +21,10 @@ import scala.collection.mutable
 
 case class RuntimeStatistic(stats: DescriptiveStatistics) {
   lazy val (lower, upper) = calculateCI
-  def avg = stats.getMean.round
-  def median = stats.getPercentile(50).round
-  def percent90 = stats.getPercentile(90).round
-  def stdDev = stats.getStandardDeviation.round
+  def avg = stats.getMean
+  def median = stats.getPercentile(50)
+  def percent90 = stats.getPercentile(90)
+  def stdDev = stats.getStandardDeviation
   def samples = stats.getN
   def variance = stats.getVariance
 
@@ -34,7 +34,7 @@ case class RuntimeStatistic(stats: DescriptiveStatistics) {
     val criticalValue = tDist.inverseCumulativeProbability(1.0 - 0.05 / 2)
     val ci = criticalValue * stats.getStandardDeviation / Math.sqrt(stats.getN)
 
-    ((avg - ci).round, (avg + ci).round)
+    (avg - ci, avg + ci)
   }
 
   def sse : Double = {
@@ -148,7 +148,7 @@ object StageRuntimeComparer {
     timeAxis.setDateFormatOverride(dateFormat)
     timeAxis.setAutoRange(true)
 
-    timeAxis.setRange(new Date(0), new Date(Math.max(barrierData._2.avg, noBarrierData._2.avg)))
+    timeAxis.setRange(new Date(0), new Date(Math.max(barrierData._2.avg, noBarrierData._2.avg).round))
     timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 10))
     timeAxis.setMinorTickMarksVisible(true)
     timeAxis.setMinorTickCount(2)
@@ -185,7 +185,7 @@ object StageRuntimeComparer {
     val pValue = tTest.tTest(noBarrierStats.stats, barrierStats.stats)
     println(s"P: $pValue")
 
-    // Test if we can reject barrier = barrier with confident interval 0.95
+    // Test if we can reject no barrier = barrier with confident interval 0.95
     val significant = tTest.tTest(noBarrierStats.stats, barrierStats.stats, 0.05)
 
     val meanDiff = (barrierStats.avg - noBarrierStats.avg).toDouble
