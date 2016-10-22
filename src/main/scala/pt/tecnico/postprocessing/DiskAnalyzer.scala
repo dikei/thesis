@@ -2,7 +2,6 @@ package pt.tecnico.postprocessing
 
 import java.io.{File, FileWriter}
 import java.util.Date
-import java.util.regex.Pattern
 
 import net.stamfest.rrd.RRDp
 import org.jfree.data.time.{Second, TimeSeries, TimeSeriesCollection}
@@ -11,7 +10,7 @@ import org.supercsv.cellprocessor.constraint.NotNull
 import org.supercsv.cellprocessor.ift.CellProcessor
 import org.supercsv.io.CsvBeanWriter
 import org.supercsv.prefs.CsvPreference
-import pt.tecnico.spark.util.{AppData, StageData, DiskStatistic, StageRuntimeStatistic}
+import pt.tecnico.spark.util.{AppData, DiskStatistic, StageData}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer

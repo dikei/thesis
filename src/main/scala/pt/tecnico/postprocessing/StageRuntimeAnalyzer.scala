@@ -1,6 +1,6 @@
 package pt.tecnico.postprocessing
 
-import java.awt.{Color, Font}
+import java.awt.{BasicStroke, Color, Font}
 import java.io.{File, FileReader, FileWriter}
 import java.util.Date
 import java.util.regex.Pattern
@@ -90,12 +90,14 @@ object StageRuntimeAnalyzer {
 
     data.foreach { case (appData, stages, outputPrefix) =>
       val collection = new TaskSeriesCollection()
-      val markers = mutable.Buffer[IntervalMarker]()
-      val stageSeries = new TaskSeries("Stages")
+      val markers = mutable.Buffer[Marker]()
+      val stageSeries = new TaskSeries("All")
       val executorSeries = mutable.HashMap[String, TaskSeries]()
       var index = 0
       var stageProcessed = 0
-      stages.groupBy(_.jobId).toList.sortBy(_._1).foreach { case (jobId, jobStages) =>
+      val stageData = stages.groupBy(_.jobId).toList.sortBy(_._1)
+      val jobCount = stageData.length
+      stageData.foreach { case (jobId, jobStages) =>
         val sortedStages = jobStages.sortBy(_.startTime)
         var startTime = java.lang.Long.MAX_VALUE
         var endTime = -1L
@@ -139,32 +141,54 @@ object StageRuntimeAnalyzer {
             }
           }
         }
-        val jobMarker = new IntervalMarker(startTime, endTime)
-        jobMarker.setLabel(jobId.toString)
-        jobMarker.setAlpha(0.2f)
-        jobMarker.setLabelFont(jobFont)
-        jobMarker.setLabelAnchor(RectangleAnchor.TOP)
-        jobMarker.setLabelOffset(new RectangleInsets(20, 0, 0, 0))
-        jobMarker.setPaint(jobBackgrounds(index % jobBackgrounds.length))
+
+        if (index < jobCount - 1) {
+          val jobMarker = new ValueMarker(endTime)
+          jobMarker.setAlpha(1.0f)
+          jobMarker.setPaint(Color.RED)
+          jobMarker.setStroke(new BasicStroke(
+            0.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+            1.0f, Array(20.0f, 10.0f), 0.0f
+          ))
+          markers += jobMarker
+        }
         index += 1
-        markers += jobMarker
+//        val jobMarker = new IntervalMarker(startTime, endTime)
+//        jobMarker.setLabel(jobId.toString)
+//        jobMarker.setAlpha(0.2f)
+//        jobMarker.setLabelFont(jobFont)
+//        jobMarker.setLabelAnchor(RectangleAnchor.TOP)
+//        jobMarker.setLabelOffset(new RectangleInsets(20, 0, 0, 0))
+//        jobMarker.setPaint(jobBackgrounds(index % jobBackgrounds.length))
+//        index += 1
+//        markers += jobMarker
       }
       collection.add(stageSeries)
+
+      var counter = 1
       executorSeries.toSeq.sortBy(_._1).foreach { case (_, series) =>
+        series.setKey(s"Worker-$counter")
+        counter += 1
         collection.add(series)
       }
       val dateFormat = new RelativeSecondFormat(appData.start)
-      val timeAxis = new CustomDateAxis("Time")
+//      val axisFont = new Font("SansSerif", Font.PLAIN, 40)
+
+      val timeAxis = new CustomDateAxis("Time (seconds)")
+//      timeAxis.setLabelFont(axisFont)
+//      timeAxis.setTickLabelFont(axisFont)
       timeAxis.setLowerBound(0)
       timeAxis.setDateFormatOverride(dateFormat)
       timeAxis.setRange(new Date(appData.start), new Date(appData.end))
-      timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 10))
+      timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 30))
       timeAxis.setMinorTickMarksVisible(true)
       timeAxis.setMinorTickCount(2)
       timeAxis.setLowerMargin(0.02)
       timeAxis.setUpperMargin(0.02)
 
-      val categoryAxis = new CategoryAxis("Stages")
+      val categoryAxis = new CategoryAxis("Stages (id)")
+//      categoryAxis.setLabelFont(axisFont)
+//      categoryAxis.setTickLabelFont(axisFont)
 
       val renderer = new StageGanttRenderer(collection)
       renderer.setBarPainter(new StandardBarPainter)
@@ -176,11 +200,16 @@ object StageRuntimeAnalyzer {
       markers.foreach { marker =>
         plot.addRangeMarker(marker)
       }
-      val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
-      val output = new File( s"$outputPrefix-stages.pdf" )
-      val width = 1280 * 2
-      val height = 960
-      Utils.saveChartAsPDF(output, chart, width, height)
+//      val titleFont = new Font("SansSerif", Font.BOLD, 40)
+      val chart = new JFreeChart("", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
+//      val legendFont = new Font("SansSerif", Font.PLAIN, 40)
+//      chart.getLegend.setItemFont(legendFont)
+      chart.setBackgroundPaint(Color.WHITE)
+      val output = new File( s"$outputPrefix-stages.png" )
+      val width = 500
+      val height = 400
+//      Utils.saveChartAsPDF(output, chart, width, height)
+      ChartUtilities.saveChartAsPNG(output, chart, width, height)
     }
   }
 

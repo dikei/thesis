@@ -1,6 +1,6 @@
 package pt.tecnico.postprocessing
 
-import java.awt.{Color, Font}
+import java.awt.{BasicStroke, Color, Font}
 import java.io.File
 import java.util.Date
 
@@ -8,7 +8,7 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics
 import org.apache.commons.math3.distribution.TDistribution
 import org.apache.commons.math3.stat.inference.TTest
 import org.jfree.chart.axis.{CategoryAxis, DateTickUnit, DateTickUnitType}
-import org.jfree.chart.plot.{CategoryPlot, IntervalMarker, PlotOrientation}
+import org.jfree.chart.plot._
 import org.jfree.chart.renderer.category.StandardBarPainter
 import org.jfree.chart.title.TextTitle
 import org.jfree.chart.{ChartUtilities, JFreeChart}
@@ -83,11 +83,10 @@ object StageRuntimeComparer {
 
 
     val collection = new TaskSeriesCollection()
-    val markers = mutable.Buffer[IntervalMarker]()
-    val barrierSeries = new TaskSeries("Barrier")
-    val noBarrierSeries = new TaskSeries("NoBarrier")
+    val markers = mutable.Buffer[Marker]()
+    val barrierSeries = new TaskSeries("Batch Execution")
+    val noBarrierSeries = new TaskSeries("Pipeline Execution")
 
-    var index = 0
     val jobFont = new Font("Dialog", Font.PLAIN, 40)
     val jobBackgrounds = Array (
       new Color(247,247,247),
@@ -96,7 +95,8 @@ object StageRuntimeComparer {
 
 
     val barrierStagesData = barrierData._1
-    barrierStagesData.foreach { case (jobId, jobStages) =>
+    val barrierJobCount = barrierStagesData.length
+    barrierStagesData.zipWithIndex.foreach { case ((jobId, jobStages), index) =>
       val sortedStages = jobStages.sortBy(_.startTime)
       var startTime = java.lang.Long.MAX_VALUE
       var endTime = -1L
@@ -111,19 +111,21 @@ object StageRuntimeComparer {
         val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
         barrierSeries.add(task)
       }
-      val jobMarker = new IntervalMarker(startTime, endTime)
-      jobMarker.setLabel(jobId.toString)
-      jobMarker.setAlpha(0.2f)
-      jobMarker.setLabelFont(jobFont)
-      jobMarker.setLabelAnchor(RectangleAnchor.BOTTOM)
-      jobMarker.setLabelOffset(new RectangleInsets(20, 0, 0, 0))
-      jobMarker.setPaint(jobBackgrounds(index % jobBackgrounds.length))
-      index += 1
-      markers += jobMarker
+      if (index < barrierJobCount - 1) {
+        val jobMarker = new ValueMarker(endTime)
+        jobMarker.setAlpha(1.0f)
+        jobMarker.setPaint(Color.RED)
+        jobMarker.setStroke(new BasicStroke(
+          0.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+          1.0f, Array(20.0f, 10.0f), 0.0f
+        ))
+        markers += jobMarker
+      }
     }
 
     val noBarrierStageData = noBarrierData._1
-    noBarrierStageData.foreach { case (jobId, jobStages) =>
+    val noBarrierJobCount = noBarrierStageData.length
+    noBarrierStageData.zipWithIndex.foreach { case ((jobId, jobStages), index) =>
       val sortedStages = jobStages.sortBy(_.startTime)
       var startTime = java.lang.Long.MAX_VALUE
       var endTime = -1L
@@ -138,48 +140,66 @@ object StageRuntimeComparer {
         val task = new Task(stage.stageId.toString, new SimpleTimePeriod(stage.startTime, stage.completionTime))
         noBarrierSeries.add(task)
       }
+      if (index < noBarrierJobCount - 1) {
+        val jobMarker = new ValueMarker(endTime)
+        jobMarker.setAlpha(1.0f)
+        jobMarker.setPaint(Color.BLUE)
+        jobMarker.setStroke(new BasicStroke(
+          0.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+          1.0f, Array(20.0f, 10.0f), 0.0f
+        ))
+        markers += jobMarker
+      }
     }
 
     collection.add(barrierSeries)
     collection.add(noBarrierSeries)
     val dateFormat = new RelativeSecondFormat(0)
-    val timeAxis = new CustomDateAxis("Time")
+//    val axisFont = new Font("SansSerif", Font.PLAIN, 50)
+
+    val timeAxis = new CustomDateAxis("Time (s)")
+//    timeAxis.setLabelFont(axisFont)
     timeAxis.setLowerBound(0)
     timeAxis.setDateFormatOverride(dateFormat)
     timeAxis.setAutoRange(true)
 
     timeAxis.setRange(new Date(0), new Date(Math.max(barrierData._2.avg, noBarrierData._2.avg).round))
-    timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 10))
-    timeAxis.setMinorTickMarksVisible(true)
-    timeAxis.setMinorTickCount(2)
+    timeAxis.setTickUnit(new DateTickUnit(DateTickUnitType.SECOND, 30))
+    timeAxis.setTickMarksVisible(true)
     timeAxis.setLowerMargin(0.02)
     timeAxis.setUpperMargin(0.02)
 
-    val categoryAxis = new CategoryAxis("Stages")
+    val categoryAxis = new CategoryAxis("Stage (id)")
+//    categoryAxis.setLabelFont(axisFont)
 
     val renderer = new StageGanttRenderer(collection)
     renderer.setBarPainter(new StandardBarPainter)
     renderer.setDrawBarOutline(false)
     renderer.setShadowVisible(false)
     val plot = new CategoryPlot(collection, categoryAxis, timeAxis, renderer)
+    plot.setRangeGridlinesVisible(false)
     plot.setOrientation(PlotOrientation.HORIZONTAL)
     plot.getDomainAxis.setCategoryMargin(0.3)
     markers.foreach { marker =>
       plot.addRangeMarker(marker)
     }
-    val chart = new JFreeChart("Stage gantt", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
+    val chart = new JFreeChart("", JFreeChart.DEFAULT_TITLE_FONT, plot, true)
+    chart.setBackgroundPaint(Color.WHITE)
+
+//    val legendFont = new Font("SansSerif", Font.PLAIN, 50)
+//    chart.getLegend.setItemFont(legendFont)
 
     val barrierStats = barrierData._2
     val noBarrierStats = noBarrierData._2
 
     val barrierTitle = new TextTitle(barrierStats.toString)
     barrierTitle.setPaint(Color.RED)
-    barrierTitle.getHeight
-    chart.addSubtitle(barrierTitle)
+//    barrierTitle.getHeight
+//    chart.addSubtitle(barrierTitle)
 
     val noBarrierTitle = new TextTitle(noBarrierStats.toString)
     noBarrierTitle.setPaint(Color.BLUE)
-    chart.addSubtitle(noBarrierTitle)
+//    chart.addSubtitle(noBarrierTitle)
 
     val tTest = new TTest
     val pValue = tTest.tTest(noBarrierStats.stats, barrierStats.stats)
@@ -199,18 +219,18 @@ object StageRuntimeComparer {
 
     val (meanLower, meanUpper) = (meanDiff - criticalValue * S, meanDiff + criticalValue * S)
 
-    chart.addSubtitle(new TextTitle(s"Significant: %s, improvement: %.2f %%, 95%% Confident interval: %.2f %% - %.2f %%"
-      .format(
-        significant,
-        meanDiff * 100 / barrierStats.avg,
-        meanLower * 100/ barrierStats.avg,
-        meanUpper * 100/ barrierStats.avg)
-    ))
+//    chart.addSubtitle(new TextTitle(s"Significant: %s, improvement: %.2f %%, 95%% Confident interval: %.2f %% - %.2f %%"
+//      .format(
+//        significant,
+//        meanDiff * 100 / barrierStats.avg,
+//        meanLower * 100/ barrierStats.avg,
+//        meanUpper * 100/ barrierStats.avg)
+//    ))
 
     val output = new File(outputFile)
-    val width = 1280 * 2
-    val height = 960
-    ChartUtilities.saveChartAsPNG(output, chart, width, height)
+    val width = 600
+    val height = 360
+    Utils.saveChartAsPDF(output, chart, width, height)
   }
 
   def computeAverageStageData(data: Seq[(AppData, Seq[StageData], String)]):

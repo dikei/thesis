@@ -57,12 +57,14 @@ object LogisticRegressionApp {
     predictionResult.cache()
 
     // Save the result
-    predictionResult.saveAsTextFile(output)
-
-    // Print analytics of the result
-
-    val metrics = new MulticlassMetrics(predictionResult)
-    println("Precision = " + metrics.precision)
-    println("Recall = " + metrics.recall)
+    if (output.isEmpty) {
+      predictionResult.count()
+    } else {
+      predictionResult.saveAsTextFile(output)
+      // Print analytics of the result
+      val metrics = new MulticlassMetrics(predictionResult)
+      println("Precision = " + metrics.precision)
+      println("Recall = " + metrics.recall)
+    }
   }
 }

@@ -362,7 +362,7 @@ object Utils {
     }.slice(lower, upper + 1)
   }
 
-  def stageFilter(stage: StageData): Boolean =  stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
+  def stageFilter(stage: StageData): Boolean = stage.jobId > 0 // stage.stageId >= 7 && stage.stageId <= 9
 
   def saveChartAsPDF(output: File, chart: JFreeChart, width: Int, height: Int): Unit = {
     val pagesize = new Rectangle(width, height)
